@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Amharic Instruction Fine-Tuning Engine (CSV -> SFT Chatbot)
-Fine-tunes pre-trained TinyMamba on user-provided CSV files containing (prompt, answer).
-
-Usage:
-    python3 finetune_csv.py --csv_path dataset.csv --epochs 5 --lr 2e-4
+Ultra-Fast & Stable Amharic Instruction Fine-Tuning (SFT) Engine for TinyMamba
+Aligns TinyMamba into the conversational persona 'Hayyuu'.
 """
 
 import os
 import sys
-import math
 import time
+import math
 import argparse
 import pandas as pd
 import numpy as np
@@ -18,130 +15,142 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lifelong_mamba_engram import TinyMamba, VOCAB_SIZE
+from generate import TinyMamba, VOCAB_SIZE
 
-def parse_csv(csv_path):
-    df = pd.read_csv(csv_path)
-    print(f"Loaded CSV '{csv_path}' with {len(df)} rows. Columns: {list(df.columns)}")
-    
-    # Auto-detect prompt and response columns
-    cols = [c.lower() for c in df.columns]
-    if "instruction" in cols:
-        p_col = df.columns[cols.index("instruction")]
-    elif "prompt" in cols:
-        p_col = df.columns[cols.index("prompt")]
-    else:
-        p_col = df.columns[0]
-
-    if "response" in cols:
-        r_col = df.columns[cols.index("response")]
-    elif "answer" in cols:
-        r_col = df.columns[cols.index("answer")]
-    else:
-        r_col = df.columns[1]
-    
-    print(f"Using Prompt Column: '{p_col}' | Response Column: '{r_col}'")
-    
-    samples = []
-    for _, row in df.iterrows():
-        p = str(row[p_col]).strip()
-        r = str(row[r_col]).strip()
-        if p and r:
-            # Format conversational template: [USER] prompt \n [BOT] answer \n
-            formatted = f"<s>[USER] {p}\n[BOT] {r}</s>\n"
-            samples.append((p, r, formatted))
-            
-    print(f"Successfully formatted {len(samples)} instruction pairs.")
-    return samples
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Fine-tune Mamba on CSV prompt-answer dataset")
-    parser.add_argument("--csv_path", type=str, required=True, help="Path to CSV dataset")
-    parser.add_argument("--model_dir", type=str, default=".", help="Directory with best_mamba.pt")
-    parser.add_argument("--output_path", type=str, default="best_mamba_chatbot.pt", help="Save path for fine-tuned chatbot")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of fine-tuning epochs")
-    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+def run_sft():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv_path", type=str, default="./data/amharic_instruction_dataset_5k.csv")
+    parser.add_argument("--base_model_path", type=str, default="./best_mamba.pt")
+    parser.add_argument("--output_path", type=str, default="./best_mamba.pt")
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--max_len", type=int, default=384)
+    parser.add_argument("--lr", type=float, default=5e-5)
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Running SFT on device: {device}")
+    print(f"Running Fast SFT on device: {device}", flush=True)
 
-    samples = parse_csv(args.csv_path)
-    if not samples:
-        print("Error: No valid prompt-answer pairs found in CSV.")
+    if not os.path.exists(args.csv_path):
+        print(f"Error: CSV not found at '{args.csv_path}'")
         return
 
-    # Load Base Pre-trained Mamba
-    model = TinyMamba(d_model=256, n_layer=6).to(device)
-    base_ckpt = os.path.join(args.model_dir, "best_mamba.pt")
-    if os.path.exists(base_ckpt):
-        ckpt = torch.load(base_ckpt, map_location=device)
-        model.load_state_dict(ckpt["model"])
-        print(f"✓ Loaded pre-trained base Mamba weights from '{base_ckpt}'")
+    df = pd.read_csv(args.csv_path)
+    cols = [c.lower() for c in df.columns]
+    p_col = df.columns[cols.index("instruction")] if "instruction" in cols else (df.columns[cols.index("prompt")] if "prompt" in cols else df.columns[0])
+    r_col = df.columns[cols.index("response")] if "response" in cols else (df.columns[cols.index("answer")] if "answer" in cols else df.columns[1])
 
-    model.train()
+    print(f"Loaded {len(df)} pairs. Prompt Column: '{p_col}' | Response: '{r_col}'", flush=True)
+
+    # Prepare formatted byte sequences with prompt-masking
+    samples = []
+    for _, row in df.iterrows():
+        p_str = str(row[p_col]).strip()
+        r_str = str(row[r_col]).strip()
+        if not p_str or not r_str:
+            continue
+        
+        full_text = f"<s>[USER] {p_str}\n[BOT] {r_str}</s>\n"
+        raw_bytes = list(full_text.encode("utf-8"))[:args.max_len]
+        if len(raw_bytes) < 10:
+            continue
+        
+        # Find where [BOT] begins so we can mask user prompt loss
+        bot_prefix = f"<s>[USER] {p_str}\n[BOT] ".encode("utf-8")
+        bot_start_idx = min(len(bot_prefix), len(raw_bytes) - 1)
+        samples.append((raw_bytes, bot_start_idx))
+
+    print(f"✓ Formatted {len(samples)} valid training samples.", flush=True)
+
+    model = TinyMamba(d_model=256, n_layer=6, d_state=16, vocab_size=VOCAB_SIZE).to(device)
+
+    # Load golden base weights if available
+    golden_path = "./best_mamba_golden.pt"
+    load_path = golden_path if os.path.exists(golden_path) else args.base_model_path
+    if os.path.exists(load_path):
+        ckpt = torch.load(load_path, map_location=device)
+        model.load_state_dict(ckpt.get("model", ckpt), strict=False)
+        print(f"✓ Loaded base weights from '{load_path}'", flush=True)
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
 
-    # Encode instruction corpus
-    full_text = "".join([s[2] for s in samples])
-    raw_bytes = list(full_text.encode("utf-8"))
-    print(f"Total fine-tuning corpus size: {len(raw_bytes):,} bytes")
-
-    BLOCK_SIZE = 256
-    n_batches = max(1, len(raw_bytes) // BLOCK_SIZE)
-
     print("\n" + "=" * 60)
-    print("STARTING CHATBOT INSTRUCTION FINE-TUNING")
-    print("=" * 60)
+    print(f"STARTING FAST INSTRUCTION FINE-TUNING (5 Epochs, {len(samples)//args.batch_size} steps/epoch)")
+    print("=" * 60, flush=True)
 
+    model.train()
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
+        np.random.shuffle(samples)
         losses = []
-        for _ in range(n_batches):
-            max_idx = max(1, len(raw_bytes) - BLOCK_SIZE - 1)
-            ix = np.random.randint(0, max_idx, size=min(args.batch_size, len(samples)))
-            
-            x = torch.stack([torch.tensor(raw_bytes[i:i + BLOCK_SIZE], dtype=torch.long) for i in ix]).to(device)
-            y = torch.stack([torch.tensor(raw_bytes[i + 1:i + 1 + BLOCK_SIZE], dtype=torch.long) for i in ix]).to(device)
+
+        for i in range(0, len(samples), args.batch_size):
+            batch = samples[i:i + args.batch_size]
+            if len(batch) < 2:
+                continue
+
+            max_b_len = max(len(s[0]) for s in batch)
+            # Pad batch with 0
+            x_arr = np.zeros((len(batch), max_b_len - 1), dtype=np.int64)
+            y_arr = np.full((len(batch), max_b_len - 1), -100, dtype=np.int64)  # -100 is ignored by CrossEntropy
+
+            for b_idx, (r_bytes, bot_start) in enumerate(batch):
+                seq_len = len(r_bytes)
+                x_arr[b_idx, :seq_len - 1] = r_bytes[:-1]
+                # Only compute loss on [BOT] response
+                for target_pos in range(bot_start - 1, seq_len - 1):
+                    y_arr[b_idx, target_pos] = r_bytes[target_pos + 1]
+
+            x_t = torch.tensor(x_arr, dtype=torch.long, device=device)
+            y_t = torch.tensor(y_arr, dtype=torch.long, device=device)
 
             optimizer.zero_grad()
-            with torch.amp.autocast("cuda", enabled=(device == "cuda")):
-                logits, loss = model(x, targets=y)
+            logits, _ = model(x_t)
+            
+            # Cross-entropy with prompt masking
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y_t.view(-1), ignore_index=-100)
+
+            if torch.isnan(loss) or torch.isinf(loss):
+                continue
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             losses.append(loss.item())
 
-        avg_loss = np.mean(losses)
+        avg_loss = np.mean(losses) if losses else 0.0
         avg_bpb = avg_loss / math.log(2)
-        print(f"Epoch {epoch:2d}/{args.epochs:2d} | Train Loss: {avg_loss:.4f} ({avg_bpb:.3f} BPB) | Time: {time.time()-t0:.1f}s")
+        print(f"Epoch {epoch:2d}/{args.epochs:2d} | Train Loss: {avg_loss:.4f} ({avg_bpb:.3f} BPB) | Time: {time.time()-t0:.1f}s", flush=True)
 
     # Save fine-tuned chatbot model
     torch.save({"model": model.state_dict(), "epochs": args.epochs, "val_bpb": avg_bpb}, args.output_path)
-    print(f"\n✓ SUCCESS! Fine-tuned chatbot saved to: '{args.output_path}'")
+    print(f"\n✓ SUCCESS! Fine-tuned chatbot saved to: '{args.output_path}'", flush=True)
 
     # Test Sample Interaction
     model.eval()
     print("\n" + "=" * 60)
-    print("TESTING CHATBOT INFERENCE")
-    print("=" * 60)
-    for p, r, _ in samples[:3]:
+    print("TESTING CHATBOT INFERENCE (HAYYUU)")
+    print("=" * 60, flush=True)
+    test_prompts = [
+        "ስምህ ማን ይባላል?",
+        "ሰላም እንዴት ነህ?",
+        "የኢትዮጵያ ታላቁ የህዳሴ ግድብ የት ይገኛል?"
+    ]
+    for p in test_prompts:
         prompt_fmt = f"<s>[USER] {p}\n[BOT] "
         p_bytes = torch.tensor([list(prompt_fmt.encode('utf-8'))], dtype=torch.long, device=device)
         with torch.no_grad():
-            for _ in range(60):
+            for _ in range(200):
                 logits, _ = model(p_bytes)
                 next_id = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
                 p_bytes = torch.cat([p_bytes, next_id], dim=1)
-                if next_id.item() == ord('\n'):
+                # Check for </s>
+                if p_bytes[0, -4:].tolist() == [ord('<'), ord('/'), ord('s'), ord('>')]:
                     break
         gen = bytes(p_bytes[0].cpu().tolist()).decode("utf-8", errors="replace")
+        ans = gen.split("[BOT]")[-1].replace("</s>", "").strip()
         print(f"\nPrompt: {p}")
-        print(f"Generated Bot Answer:\n  -> {gen.split('[BOT]')[-1].strip()}")
-
+        print(f"Hayyuu: {ans}", flush=True)
 
 if __name__ == "__main__":
-    main()
+    run_sft()
