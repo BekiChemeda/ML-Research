@@ -82,6 +82,7 @@ def run_scaled_sft():
         return
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    scaler = torch.amp.GradScaler('cuda')
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * (len(samples) // args.batch_size))
 
     print("\n" + "=" * 65, flush=True)
@@ -111,11 +112,14 @@ def run_scaled_sft():
             y_t = torch.tensor(y_pad, dtype=torch.long, device=device)
 
             optimizer.zero_grad(set_to_none=True)
-            logits, loss = model(x_t, targets=y_t)
+            with torch.amp.autocast('cuda'):
+                logits, loss = model(x_t, targets=y_t)
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
 
             epoch_loss += loss.item()
