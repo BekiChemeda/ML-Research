@@ -178,7 +178,10 @@ class HebbianEngramMemory(nn.Module):
         # Extract neocortical representations from slow Mamba
         x = model.embed(x_idx)
         for layer in model.layers:
-            x = x + layer["mixer"](layer["norm"](x))
+            if isinstance(layer, nn.ModuleDict):
+                x = x + layer["mixer"](layer["norm"](x))
+            else:
+                x = layer(x)
             
         k = F.normalize(self.w_k(x[0]), dim=-1)  # (L, mem_dim)
         v = F.normalize(self.w_v(x[0]), dim=-1)  # (L, mem_dim)
@@ -218,16 +221,20 @@ class LifelongAmharicSystem:
             self.model = ScaledAmharicMamba(d_model=cfg.get("d_model", 384), n_layer=cfg.get("n_layer", 10), d_state=cfg.get("d_state", 16)).to(self.device)
             self.memory = HebbianEngramMemory(d_model=cfg.get("d_model", 384), mem_dim=192).to(self.device)
             self.model.load_state_dict(ckpt["model"])
-            print(f"✓ Neocortex loaded: Scaled Mamba ({cfg.get('d_model', 384)}d, {cfg.get('n_layer', 10)}L, SFT Loss: {ckpt.get('val_bpb', 0.37):.3f} BPB)")
+            self.ckpt_path = scaled_ckpt_path
+            print(f"✓ Neocortex loaded: Scaled Mamba ({cfg.get('d_model', 384)}d, {cfg.get('n_layer', 10)}L, SFT Loss: {ckpt.get('val_bpb', 0.29):.3f} BPB)")
         elif os.path.exists(tiny_ckpt_path):
             ckpt = torch.load(tiny_ckpt_path, map_location=self.device, weights_only=False)
             self.model = TinyMamba(d_model=256, n_layer=6).to(self.device)
             self.memory = HebbianEngramMemory(d_model=256, mem_dim=128).to(self.device)
             self.model.load_state_dict(ckpt["model"])
+            self.ckpt_path = tiny_ckpt_path
             print(f"✓ Neocortex loaded: Pre-trained TinyMamba (Val BPB: {ckpt.get('val_bpb', 1.32):.3f})")
         else:
-            self.model = TinyMamba(d_model=384, n_layer=10).to(self.device)
+            from scale_mamba_42m import ScaledAmharicMamba
+            self.model = ScaledAmharicMamba(d_model=384, n_layer=10).to(self.device)
             self.memory = HebbianEngramMemory(d_model=384, mem_dim=192).to(self.device)
+            self.ckpt_path = os.path.join(model_dir, "best_mamba_scaled.pt")
             print("Warning: Checkpoint not found, initializing fresh weights.")
             
         self.model.eval()
@@ -340,8 +347,12 @@ class LifelongAmharicSystem:
         opt.step()
         self.model.eval()
         
-        ckpt_path = os.path.join(self.model_dir, "best_mamba.pt")
-        torch.save({"model": self.model.state_dict(), "rl_step": True}, ckpt_path)
+        ckpt_path = getattr(self, "ckpt_path", os.path.join(self.model_dir, "best_mamba_scaled.pt"))
+        torch.save({
+            "model": self.model.state_dict(),
+            "config": {"d_model": self.model.d_model, "n_layer": len(self.model.layers), "d_state": 16},
+            "rl_step": True
+        }, ckpt_path)
         print(f"✓ [RLHF POLICY STEP] Strengthened preference for: \"{chosen_response[:40]}...\" (Loss: {loss.item():.4f})")
         return loss.item()
 
@@ -373,8 +384,12 @@ class LifelongAmharicSystem:
         opt.step()
         self.model.eval()
         
-        ckpt_path = os.path.join(self.model_dir, "best_mamba.pt")
-        torch.save({"model": self.model.state_dict(), "rl_step": True}, ckpt_path)
+        ckpt_path = getattr(self, "ckpt_path", os.path.join(self.model_dir, "best_mamba_scaled.pt"))
+        torch.save({
+            "model": self.model.state_dict(),
+            "config": {"d_model": self.model.d_model, "n_layer": len(self.model.layers), "d_state": 16},
+            "rl_step": True
+        }, ckpt_path)
         print(f"✓ [RLHF NEGATIVE PENALTY] Penalized both bad responses")
         return True
 
