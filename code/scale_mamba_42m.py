@@ -126,10 +126,12 @@ class ScaledAmharicMamba(nn.Module):
             nn.init.zeros_(module.bias)
             nn.init.ones_(module.weight)
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, memory_module=None):
         x = self.embed(idx)
         for layer in self.layers:
             x = layer(x)
+        if memory_module is not None:
+            x = memory_module(x)
         x = self.norm_f(x)
         logits = self.head(x)
 

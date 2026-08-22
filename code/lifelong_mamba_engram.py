@@ -206,17 +206,29 @@ class LifelongAmharicSystem:
     def __init__(self, model_dir=".", device=None):
         self.model_dir = model_dir
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = TinyMamba(d_model=256, n_layer=6).to(self.device)
-        self.memory = HebbianEngramMemory(d_model=256, mem_dim=128).to(self.device)
         
-        # Load Pretrained Neocortex Weights (Mamba)
-        ckpt_path = os.path.join(model_dir, "best_mamba.pt")
-        if os.path.exists(ckpt_path):
-            ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
+        # Check if Scaled Mamba is available
+        scaled_ckpt_path = os.path.join(model_dir, "best_mamba_scaled.pt")
+        tiny_ckpt_path = os.path.join(model_dir, "best_mamba.pt")
+        
+        if os.path.exists(scaled_ckpt_path):
+            from scale_mamba_42m import ScaledAmharicMamba
+            ckpt = torch.load(scaled_ckpt_path, map_location=self.device, weights_only=False)
+            cfg = ckpt.get("config", {"d_model": 384, "n_layer": 10, "d_state": 16})
+            self.model = ScaledAmharicMamba(d_model=cfg.get("d_model", 384), n_layer=cfg.get("n_layer", 10), d_state=cfg.get("d_state", 16)).to(self.device)
+            self.memory = HebbianEngramMemory(d_model=cfg.get("d_model", 384), mem_dim=192).to(self.device)
+            self.model.load_state_dict(ckpt["model"])
+            print(f"✓ Neocortex loaded: Scaled Mamba ({cfg.get('d_model', 384)}d, {cfg.get('n_layer', 10)}L, SFT Loss: {ckpt.get('val_bpb', 0.37):.3f} BPB)")
+        elif os.path.exists(tiny_ckpt_path):
+            ckpt = torch.load(tiny_ckpt_path, map_location=self.device, weights_only=False)
+            self.model = TinyMamba(d_model=256, n_layer=6).to(self.device)
+            self.memory = HebbianEngramMemory(d_model=256, mem_dim=128).to(self.device)
             self.model.load_state_dict(ckpt["model"])
             print(f"✓ Neocortex loaded: Pre-trained TinyMamba (Val BPB: {ckpt.get('val_bpb', 1.32):.3f})")
         else:
-            print(f"Warning: {ckpt_path} not found, initializing fresh weights.")
+            self.model = TinyMamba(d_model=384, n_layer=10).to(self.device)
+            self.memory = HebbianEngramMemory(d_model=384, mem_dim=192).to(self.device)
+            print("Warning: Checkpoint not found, initializing fresh weights.")
             
         self.model.eval()
 
