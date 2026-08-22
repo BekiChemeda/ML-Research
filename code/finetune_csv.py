@@ -26,8 +26,19 @@ def parse_csv(csv_path):
     
     # Auto-detect prompt and response columns
     cols = [c.lower() for c in df.columns]
-    p_col = df.columns[cols.index("prompt")] if "prompt" in cols else df.columns[0]
-    r_col = df.columns[cols.index("answer")] if "answer" in cols else (df.columns[cols.index("response")] if "response" in cols else df.columns[1])
+    if "instruction" in cols:
+        p_col = df.columns[cols.index("instruction")]
+    elif "prompt" in cols:
+        p_col = df.columns[cols.index("prompt")]
+    else:
+        p_col = df.columns[0]
+
+    if "response" in cols:
+        r_col = df.columns[cols.index("response")]
+    elif "answer" in cols:
+        r_col = df.columns[cols.index("answer")]
+    else:
+        r_col = df.columns[1]
     
     print(f"Using Prompt Column: '{p_col}' | Response Column: '{r_col}'")
     
