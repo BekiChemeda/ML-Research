@@ -76,12 +76,17 @@ class BiologicalHumanPersona:
             return f"😴 ይቅርታ {user_name}፣ አሁን በእንቅልፍ (Memory Replay) ላይ ነኝ። ስነቃ በደንብ እናወራለን!"
 
         prompt_fmt = f"<s>[USER] {user_prompt}\n[BOT] "
-        raw_resp = self.brain.generate(prompt_fmt, max_new_tokens=6000, temperature=0.7, top_k=40, use_memory=True)
-        bot_ans = raw_resp.split("[BOT]")[-1].replace("</s>", "").strip()
+        raw_resp = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.6, top_k=30, repetition_penalty=1.25, use_memory=True)
+        bot_ans = raw_resp.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").strip()
 
         # Fallback to fluent completion if template delimiter missing
         if not bot_ans:
-            bot_ans = self.brain.generate(user_prompt, max_new_tokens=600, temperature=0.7, use_memory=True)
+            raw_fallback = self.brain.generate(user_prompt, max_new_tokens=120, temperature=0.6, use_memory=True)
+            bot_ans = raw_fallback.replace(user_prompt, "").strip()
+
+        # Clean up any trailing broken sentences
+        if "።" in bot_ans:
+            bot_ans = bot_ans[:bot_ans.rfind("።") + 1]
 
         return bot_ans
 
