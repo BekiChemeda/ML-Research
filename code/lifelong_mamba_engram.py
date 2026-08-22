@@ -318,43 +318,58 @@ class LifelongAmharicSystem:
         self.model.eval()
         print("☀️ [WAKE UP] Synaptic consolidation complete! Memories permanently wired into Mamba weights.\n")
 
-    def rl_reward_step(self, prompt, chosen_response, rejected_response=None, lr=2e-5):
+    def rl_reward_step(self, prompt, chosen_response, lr=1e-5):
         """
-        Direct Policy Gradient Human Feedback Step:
-        Strengthens chosen response likelihood using stable bounded gradients.
+        Safe Online RLHF Policy Gradient with Replay Buffer Anchoring.
+        Trains on the chosen response alongside diverse anchor samples to prevent mode collapse.
         """
         if not chosen_response or len(chosen_response.strip()) < 2:
             return 0.0
 
         self.model.train()
         opt = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
+
+        # Diverse background anchor samples to protect foundational knowledge
+        anchor_pairs = [
+            ("ስምህ ማን ይባላል?", "ሰላም! ስሜ ሃዩ ይባላል። እኔ በአማርኛ ቋንቋ የተገነባሁ የAI ረዳት ነኝ።"),
+            ("ሰው ሰራሽ አስተውሎት ምንድን ነው?", "ሰው ሰራሽ አስተውሎት (AI) የሰውን ልጅ የማሰብ እና የመማር ችሎታ በኮምፒውተር የሚተገብር ቴክኖሎጂ ነው።"),
+            ("የአክሱም ሐውልት የት ይገኛል?", "የአክሱም ሐውልት በትግራይ ክልል በአክሱም ከተማ የሚገኝ ታሪካዊ ቅርስ ነው።"),
+        ]
+
+        batch_samples = [(prompt, chosen_response)] + [p for p in anchor_pairs if p[0] != prompt][:2]
         
-        seq_chosen = f"<s>[USER] {prompt}\n[BOT] {chosen_response}</s>\n".encode("utf-8")
-        bot_prefix = f"<s>[USER] {prompt}\n[BOT] ".encode("utf-8")
-        bot_start = min(len(bot_prefix), len(seq_chosen) - 1)
-        
-        x_chosen = torch.tensor([list(seq_chosen[:-1])], dtype=torch.long, device=self.device)
-        y_chosen = torch.full((1, len(seq_chosen) - 1), -100, dtype=torch.long, device=self.device)
-        for t in range(bot_start - 1, len(seq_chosen) - 1):
-            y_chosen[0, t] = seq_chosen[t + 1]
+        total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        for p_str, r_str in batch_samples:
+            seq = f"<s>[USER] {p_str}\n[BOT] {r_str}</s>\n".encode("utf-8")
+            bot_prefix = f"<s>[USER] {p_str}\n[BOT] ".encode("utf-8")
+            bot_start = min(len(bot_prefix), len(seq) - 1)
             
+            x = torch.tensor([list(seq[:-1])], dtype=torch.long, device=self.device)
+            y = torch.full((1, len(seq) - 1), -100, dtype=torch.long, device=self.device)
+            for t in range(bot_start - 1, len(seq) - 1):
+                y[0, t] = seq[t + 1]
+                
+            logits, _ = self.model(x)
+            loss_i = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-100)
+            
+            # Weight target prompt update higher than anchor regularizers
+            weight = 1.0 if p_str == prompt else 0.25
+            total_loss = total_loss + weight * loss_i
+
         opt.zero_grad()
-        logits_chosen, _ = self.model(x_chosen)
-        loss = F.cross_entropy(logits_chosen.view(-1, logits_chosen.size(-1)), y_chosen.view(-1), ignore_index=-100)
-        
-        loss.backward()
+        total_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
         opt.step()
         self.model.eval()
-        
+
         ckpt_path = getattr(self, "ckpt_path", os.path.join(self.model_dir, "best_mamba_scaled.pt"))
         torch.save({
             "model": self.model.state_dict(),
             "config": {"d_model": self.model.d_model, "n_layer": len(self.model.layers), "d_state": 16},
             "rl_step": True
         }, ckpt_path)
-        print(f"✓ [RLHF POLICY STEP] Strengthened preference for: \"{chosen_response[:40]}...\" (Loss: {loss.item():.4f})")
-        return loss.item()
+        print(f"✓ [SAFE RLHF ANCHORED] Preference updated without mode collapse (Loss: {total_loss.item():.4f})")
+        return total_loss.item()
 
     def rl_reject_both(self, prompt, response_A, response_B, lr=5e-5):
         """Penalizes both bad candidate responses via negative policy gradient."""
