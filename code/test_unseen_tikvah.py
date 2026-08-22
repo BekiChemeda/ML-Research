@@ -78,7 +78,11 @@ def compute_model_bpb(model, text, device="cuda", memory_module=None):
     
     with torch.no_grad():
         with torch.amp.autocast("cuda", enabled=True):
-            logits, loss = model(x, targets=y, memory_module=memory_module)
+            if isinstance(model, TinyMamba):
+                logits, loss = model(x, targets=y, memory_module=memory_module)
+            else:
+                logits, _ = model(x)
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
             
     return loss.item() / math.log(2)
 
@@ -92,7 +96,8 @@ def compute_tok_bpb(model, text, sp, fertility, device="cuda"):
     
     with torch.no_grad():
         with torch.amp.autocast("cuda", enabled=True):
-            logits, loss = model(x, targets=y)
+            logits, _ = model(x)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
             
     # Convert token loss to BPB using measured fertility
     return loss.item() / (math.log(2) * fertility)
