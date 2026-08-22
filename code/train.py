@@ -620,6 +620,28 @@ arch_effect = xf_byte_history['val_bpb'][-1] - mamba_history['val_bpb'][-1]
 tok_effect = xf_tok_history['val_bpb'][-1] - xf_byte_history['val_bpb'][-1]
 comb_effect = xf_tok_history['val_bpb'][-1] - mamba_history['val_bpb'][-1]
 
+
+# Save complete raw numerical metrics to JSON for research documentation
+all_metrics = {
+    "mamba": mamba_history,
+    "transformer_byte": xf_byte_history,
+    "transformer_tokenized": xf_tok_history,
+    "config": vars(args),
+    "metadata": {
+        "bytes_per_token": BYTES_PER_TOKEN,
+        "n_mamba_params": n_mamba,
+        "n_xf_byte_params": n_xf_b,
+        "n_xf_tok_params": n_xf_t,
+        "arch_effect_bpb": float(arch_effect),
+        "tok_effect_bpb": float(tok_effect),
+        "comb_effect_bpb": float(comb_effect),
+    }
+}
+metrics_json_path = os.path.join(args.output_dir, "training_metrics.json")
+with open(metrics_json_path, "w", encoding="utf-8") as f_json:
+    json.dump(all_metrics, f_json, indent=2)
+print(f"✓ Saved complete numerical metrics to: {metrics_json_path}", flush=True)
+
 report_path = os.path.join(args.output_dir, "RESEARCH_RESULTS_SUMMARY.md")
 report_md = f"""# Amharic Byte-Level Mamba vs. Transformer: Automated Research Report
 *Generated on {time.strftime('%Y-%m-%d %H:%M:%S')}*
