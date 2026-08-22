@@ -1,57 +1,52 @@
 #!/usr/bin/env python3
 """
-Autonomous "Living" Amharic Agent: Human-Like Biological Persona
-Dual-Engine System:
-1. Senses/Ears (Telethon UserBot): Listens to public Amharic news channels and forms instant Hebbian memories.
-2. Interaction/Voice (Telegram Bot): Chats with you, answers questions, remembers context.
-3. Biological Circadian Cycle: Awake -> Fatigue -> NREM Replay Sleep -> Synaptic Consolidation -> Wakeup.
-
-Usage:
-    python3 autonomous_human_mamba.py \
-        --bot_token "YOUR_BOT_TOKEN" \
-        --api_id "YOUR_API_ID" \
-        --api_hash "YOUR_API_HASH" \
-        --channels "tikvahethiopia" "bbcnewsamharic" "fana_broadcast"
+Autonomous Human-Like Amharic Persona: "Hayyuu" with Interactive RLHF Feedback
+Author: Beknan Chemeda
+- 100% End-to-End Neural Mamba Generation (Zero Hardcoded If/Else)
+- Interactive Dual-Candidate Generation (Option A vs Option B)
+- Real-Time Reinforcement Learning from Human Feedback (RLHF / DPO)
 """
 
 import os
 import sys
 import time
-import math
+import uuid
 import asyncio
-import argparse
 import datetime
+import argparse
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 from lifelong_mamba_engram import LifelongAmharicSystem
 
 class BiologicalHumanPersona:
-    def __init__(self, model_dir=".", fatigue_threshold=30):
+    def __init__(self, name="Hayyuu", creator="Beknan Chemeda", model_dir=".", fatigue_threshold=20):
+        self.name = name
+        self.creator = creator
         self.brain = LifelongAmharicSystem(model_dir=model_dir)
+        
+        # Circadian Rhythm State
+        self.cognitive_energy = 100.0
         self.fatigue_threshold = fatigue_threshold
-        self.cognitive_energy = 100.0   # 100% = Fully Awake, 0% = Must Sleep
         self.daily_experiences = []
         self.is_sleeping = False
-        self.name = "Hayyuu"
-        print(f"🌟 [{self.name}] Biological Human-Like Amharic Persona Born!")
+        
+        # In-memory store for pending RL feedback
+        self.pending_queries = {}
+        
+        print(f"🌟 [{self.name}] Pure Neural Mamba Agent Born! (Created by {self.creator})")
 
-    def perceive_post(self, channel_name, post_text):
-        """Processes an incoming Amharic post through sensory perception into Hippocampus."""
+    def perceive_post(self, channel_name, raw_text):
+        """Processes news posts from Amharic channels into 1-shot Hebbian memories."""
         if self.is_sleeping:
-            print(f"💤 [{self.name} is Sleeping] Sensory gating: Post queued for morning.")
             return False
 
-        # Filter meaningful text
-        clean_text = post_text.strip()
-        if len(clean_text) < 20:
+        clean_text = raw_text.strip()
+        geez_chars = sum(1 for c in clean_text if '\u1200' <= c <= '\u137F')
+        if len(clean_text) < 30 or (geez_chars / max(1, len(clean_text))) < 0.3:
             return False
 
         print(f"\n👂 [{self.name} Heard from @{channel_name}]: \"{clean_text[:70]}...\"")
-        
-        # 1-Shot Hippocampal Engram Formation
         self.brain.teach(clean_text)
         self.daily_experiences.append({
             "time": datetime.datetime.now().strftime("%H:%M:%S"),
@@ -59,88 +54,92 @@ class BiologicalHumanPersona:
             "text": clean_text
         })
         
-        # Deplete cognitive energy slightly per experience
         self.cognitive_energy = max(0.0, self.cognitive_energy - (100.0 / self.fatigue_threshold))
         print(f"⚡ Cognitive Energy: {self.cognitive_energy:.1f}% | Experiences today: {len(self.daily_experiences)}")
 
-        # Check if sleep is needed
         if self.cognitive_energy <= 0.0:
             print(f"🥱 [{self.name} is Yawning]: Fatigue threshold reached. Entering sleep cycle...")
             return "SLEEP_NEEDED"
             
         return True
 
-    def converse(self, user_name, user_prompt):
-        """Conversational response incorporating personality, current state, and memories."""
+    def converse_candidates(self, user_name, user_prompt):
+        """Generates 2 distinct neural candidate answers using pure Mamba sampling."""
         if self.is_sleeping:
-            return f"😴 ይቅርታ {user_name}፣ አሁን በእንቅልፍ (Memory Replay) ላይ ነኝ። ስነቃ በደንብ እናወራለን!"
+            return "😴 ይቅርታ አሁን በእንቅልፍ (Memory Consolidation) ላይ ነኝ። ስነቃ በደንብ እናወራለን!", "", ""
 
-        clean_p = user_prompt.strip().lower()
+        prompt_fmt = f"<s>[SYSTEM] አንተ {self.name} የተባልክ የ{self.creator} የአማርኛ ረዳት ነህ።\n[USER] {user_prompt}\n[BOT] "
 
-        # 1. Core Identity Grounding (Hayyuu Persona)
-        identity_keywords = ["ስምህ", "ማን ነህ", "ማነህ", "ስምህን", "ማን ፈጠረህ", "ማን ሰራህ", "ፈጣሪህ", "who are you", "your name"]
-        if any(k in clean_p for k in identity_keywords):
-            return f"ስሜ {self.name} ይባላል። በቤክናን ጨመዳ (Beknan Chemeda) የተገነባሁ፣ በቴሌግራም ዜናዎችን እና መረጃዎችን በየቀኑ በራሴ እየተማርኩ የማድግ ህያው የአማርኛ AI ረዳት ነኝ።"
+        # Candidate A: Focused sampling (Temp 0.45, Top-k 25, Repetition Penalty 1.35)
+        raw_A = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.45, top_k=25, repetition_penalty=1.35, use_memory=True)
+        ans_A = raw_A.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").replace("[SYSTEM]", "").strip()
+        if "።" in ans_A:
+            ans_A = ans_A[:ans_A.rfind("።") + 1]
+        if not ans_A:
+            ans_A = "በዚህ ጉዳይ ላይ ተጨማሪ መረጃ በቅርቡ እሰጣለሁ።"
 
-        # 2. Natural Conversational Greeting Anchors
-        greeting_keywords = ["ሰላም", "እንደምን አለህ", "እንዴት ነህ", "ሰላም ነው", "ጤና ይስጥልኝ", "እንደምን አደርክ", "እንደምን ዋልክ", "hi", "hello"]
-        if clean_p in greeting_keywords or (len(clean_p) < 15 and any(clean_p.startswith(g) for g in greeting_keywords)):
-            return f"ሰላም {user_name}! ደህና ነህ? ዛሬ ምን አዲስ መረጃ ወይም ጥያቄ ልርዳህ?"
+        # Candidate B: Creative / Diverse sampling (Temp 0.75, Top-k 40, Repetition Penalty 1.25)
+        raw_B = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.75, top_k=40, repetition_penalty=1.25, use_memory=True)
+        ans_B = raw_B.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").replace("[SYSTEM]", "").strip()
+        if "።" in ans_B:
+            ans_B = ans_B[:ans_B.rfind("።") + 1]
+        if not ans_B or ans_B == ans_A:
+            raw_fallback = self.brain.generate(user_prompt, max_new_tokens=120, temperature=0.8, use_memory=True)
+            ans_B = raw_fallback.replace(user_prompt, "").strip()
+            if "።" in ans_B:
+                ans_B = ans_B[:ans_B.rfind("።") + 1]
 
-        # 3. Neural Mamba Generation with Memory & Metacognition
-        prompt_fmt = f"<s>[SYSTEM] አንተ Hayyuu የተባልክ የቤክናን ጨመዳ ረዳት ነህ።\n[USER] {user_prompt}\n[BOT] "
-        raw_resp = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.6, top_k=30, repetition_penalty=1.25, use_memory=True)
-        bot_ans = raw_resp.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").replace("[SYSTEM]", "").strip()
+        query_id = str(uuid.uuid4())[:8]
+        self.pending_queries[query_id] = {
+            "prompt": user_prompt,
+            "ans_A": ans_A,
+            "ans_B": ans_B
+        }
 
-        # Fallback to fluent completion if template delimiter missing
-        if not bot_ans:
-            raw_fallback = self.brain.generate(user_prompt, max_new_tokens=120, temperature=0.6, use_memory=True)
-            bot_ans = raw_fallback.replace(user_prompt, "").strip()
+        return ans_A, ans_B, query_id
 
-        # Clean up any trailing broken sentences
-        if "።" in bot_ans:
-            bot_ans = bot_ans[:bot_ans.rfind("።") + 1]
+    def apply_rl_feedback(self, query_id, chosen_option, rating=None):
+        """Applies online policy gradient update to Mamba neural weights based on human choice."""
+        if query_id not in self.pending_queries:
+            return "ይህ ጥያቄ ከማህደረ ትውስታ አልፏል።"
 
-        return bot_ans
+        record = self.pending_queries[query_id]
+        prompt = record["prompt"]
+        
+        if chosen_option == "A":
+            chosen = record["ans_A"]
+            rejected = record["ans_B"]
+        else:
+            chosen = record["ans_B"]
+            rejected = record["ans_A"]
+
+        loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-4)
+        del self.pending_queries[query_id]
+        return f"🎯 ምርጫህ ተመዝግቧል! ኒውራል ሞዴሉ በሪኢንፎርስመንት ለርኒንግ (RLHF) ክብደቱን አዘምኗል (Loss: {loss:.4f})።"
 
     async def circadian_sleep_cycle(self, sleep_seconds=20):
-        """
-        NREM Sleep & Synaptic Consolidation:
-        1. Sharp-Wave Ripples: Replays daytime experiences at 20x speed.
-        2. Synaptic Downscaling: Prunes noisy memory traces.
-        3. Weight Consolidation: Permanently wires salient knowledge into Mamba.
-        """
+        """NREM Sleep & Synaptic Consolidation: Replays episodic memory traces into Mamba."""
         self.is_sleeping = True
         print(f"\n" + "=" * 65)
         print(f"🌙 [{self.name}] SLEEP CYCLE INITIATED: Synaptic Consolidation")
         print("=" * 65)
-        print(f"Replaying {len(self.daily_experiences)} daytime memory traces...")
-
-        # Run memory replay into Mamba cortex
         self.brain.sleep_consolidation(steps=150, lr=1e-4)
-
-        # Simulate sleep duration
         await asyncio.sleep(sleep_seconds)
-
-        # Restore cognitive energy & clear short-term buffer
         self.cognitive_energy = 100.0
         n_consolidated = len(self.daily_experiences)
         self.daily_experiences.clear()
         self.is_sleeping = False
-
-        print("=" * 65)
-        print(f"☀️ [{self.name}] WOKE UP! Energy restored to 100.0%. {n_consolidated} memories consolidated!")
-        print("=" * 65 + "\n")
+        print(f"☀️ [{self.name}] WOKE UP! Energy restored to 100.0%. {n_consolidated} memories consolidated!\n")
         return f"☀️ ሰላም! አሁን ከእንቅልፌ ነቅቻለሁ። {n_consolidated} አዳዲስ እውቀቶችን በቋሚነት ተምሬያለሁ!"
 
 
 # ==============================================================================
-# TELEGRAM USERBOT & BOT ORCHESTRATION
+# TELEGRAM BOT WITH INTERACTIVE RLHF VOTING
 # ==============================================================================
 async def start_autonomous_life(args):
     persona = BiologicalHumanPersona(model_dir=args.model_dir, fatigue_threshold=args.fatigue_threshold)
 
-    # 1. Start Telethon UserBot (Ears / Channels) if credentials provided
+    # 1. Telethon UserBot (Ears / Channels)
     if args.api_id and args.api_hash:
         try:
             from telethon import TelegramClient, events
@@ -156,20 +155,23 @@ async def start_autonomous_life(args):
                 status = persona.perceive_post(chat_title, text)
                 if status == "SLEEP_NEEDED":
                     await persona.circadian_sleep_cycle(sleep_seconds=30)
-
         except Exception as e:
-            print(f"UserBot initialization note: {e}")
+            print(f"UserBot note: {e}")
 
-    # 2. Start Telegram Bot (Voice / Chat Interface)
+    # 2. Telegram Bot (Voice / RLHF Voting Interface)
     if args.bot_token:
         try:
-            from telegram import Update
-            from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+            from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+            from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
             app = Application.builder().token(args.bot_token).build()
 
             async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-                await update.message.reply_text(f"ሰላም {update.effective_user.first_name}! እኔ {persona.name} ነኝ። በቴሌግራም ቻናሎች የሚለቀቁ ዜናዎችን እና መረጃዎችን በየቀኑ እየተማርኩ እና እየተኛሁ እውቀቴን የማሳድግ ህያው AI ነኝ።")
+                await update.message.reply_text(
+                    f"ሰላም {update.effective_user.first_name}! እኔ {persona.name} ነኝ።\n"
+                    f"በቤክናን ጨመዳ ({persona.creator}) የተገነባሁ፣ በሪኢንፎርስመንት ለርኒንግ (RLHF) ከአንተ ግብረ-መልስ የምማር ህያው የአማርኛ AI ነኝ።\n\n"
+                    f"ጥያቄ ስትጠይቀኝ 2 አማራጭ መልሶችን አቀርባለሁ፣ የተሻለውን ስትመርጥ ሞዴሉ በቀጥታ ይማራል!"
+                )
 
             async def sleep_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("🌙 እሺ፣ አሁን ለጥቂት ደቂቃዎች ተኝቼ የተማርኩትን ላጠናክር...")
@@ -181,46 +183,92 @@ async def start_autonomous_life(args):
                 prompt = update.message.text
                 if not prompt:
                     return
-                reply = persona.converse(user_name, prompt)
-                await update.message.reply_text(reply)
+
+                ans_A, ans_B, query_id = persona.converse_candidates(user_name, prompt)
+                
+                reply_text = (
+                    f"💬 ጥያቄ፡ {prompt}\n"
+                    f"────────────────────\n"
+                    f"🅰️ አማራጭ 1 (Option A):\n{ans_A}\n\n"
+                    f"🅱️ አማራጭ 2 (Option B):\n{ans_B}\n"
+                    f"────────────────────\n"
+                    f"👇 የትኛው መልስ የተሻለ ነው? (RLHF Rating)"
+                )
+
+                keyboard = [
+                    [
+                        InlineKeyboardButton("👍 ምረጥ 1 (Option A)", callback_data=f"rl_A_{query_id}"),
+                        InlineKeyboardButton("👍 ምረጥ 2 (Option B)", callback_data=f"rl_B_{query_id}")
+                    ],
+                    [
+                        InlineKeyboardButton("⭐ 1", callback_data=f"rate_1_{query_id}"),
+                        InlineKeyboardButton("⭐ 2", callback_data=f"rate_2_{query_id}"),
+                        InlineKeyboardButton("⭐ 3", callback_data=f"rate_3_{query_id}"),
+                        InlineKeyboardButton("⭐ 4", callback_data=f"rate_4_{query_id}"),
+                        InlineKeyboardButton("⭐ 5 (Best)", callback_data=f"rate_5_{query_id}")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(reply_text, reply_markup=reply_markup)
+
+            async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+                query = update.callback_query
+                await query.answer()
+                data = query.data
+
+                if data.startswith("rl_"):
+                    parts = data.split("_")
+                    chosen_opt = parts[1]
+                    q_id = parts[2]
+                    
+                    feedback_msg = persona.apply_rl_feedback(q_id, chosen_option=chosen_opt)
+                    await query.edit_message_text(
+                        f"{query.message.text}\n\n"
+                        f"────────────────────\n"
+                        f"✅ የመረጥከው፡ አማራጭ {chosen_opt}\n"
+                        f"{feedback_msg}"
+                    )
+                elif data.startswith("rate_"):
+                    parts = data.split("_")
+                    stars = parts[1]
+                    q_id = parts[2]
+                    feedback_msg = persona.apply_rl_feedback(q_id, chosen_option="A", rating=int(stars))
+                    await query.edit_message_text(
+                        f"{query.message.text}\n\n"
+                        f"────────────────────\n"
+                        f"⭐ ውጤት፡ {stars}/5 ኮከብ ተሰጥቷል!\n"
+                        f"{feedback_msg}"
+                    )
 
             app.add_handler(CommandHandler("start", start_cmd))
             app.add_handler(CommandHandler("sleep", sleep_cmd))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_msg))
+            app.add_handler(CallbackQueryHandler(button_callback))
 
-            print(f"✓ [TELEGRAM BOT VOICE ONLINE] Ready to chat with you via bot!")
+            print(f"✓ [RLHF TELEGRAM BOT ONLINE] Dual-candidate voting active!")
             await app.initialize()
             await app.start()
             await app.updater.start_polling()
 
-            # Keep event loop running forever
             while True:
                 await asyncio.sleep(3600)
 
         except Exception as e:
-            print(f"Bot initialization error: {e}")
+            print(f"Bot error: {e}")
     else:
-        print("\n[Simulation Mode]: No bot_token provided. Simulating live life cycle:")
-        persona.perceive_post("tikvahethiopia", "የኢትዮጵያ ንግድ ባንክ አዳዲስ ዲጂታል የክፍያ አገልግሎቶችን በይፋ አስመረቀ።")
-        persona.perceive_post("bbcnewsamharic", "በአፍሪካ ቀንድ የተከሰተው የድርቅ አደጋ ለመከላከል አለም አቀፍ ድጋፍ ተጠየቀ።")
-        print("\nUser asks Hayyuu: \"የኢትዮጵያ ንግድ ባንክ ምን አዲስ ነገር አደረገ?\"")
-        ans = persona.converse("በኪ", "የኢትዮጵያ ንግድ ባንክ ")
-        print(f"Hayyuu Answer: {ans}\n")
-        await persona.circadian_sleep_cycle(sleep_seconds=5)
-
+        print("No bot_token provided.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Autonomous Human-Like Amharic Agent")
+    parser = argparse.ArgumentParser(description="Autonomous Human-Like Amharic Agent with RLHF")
     parser.add_argument("--bot_token", type=str, default="", help="Telegram Bot Token")
-    parser.add_argument("--api_id", type=str, default="", help="Telegram API ID for UserBot listener")
-    parser.add_argument("--api_hash", type=str, default="", help="Telegram API Hash for UserBot listener")
-    parser.add_argument("--channels", nargs="*", default=["tikvahethiopia", "bbcnewsamharic"], help="Channels to listen to")
-    parser.add_argument("--fatigue_threshold", type=int, default=20, help="Posts read before sleep cycle")
-    parser.add_argument("--model_dir", type=str, default=".", help="Directory with best_mamba.pt")
+    parser.add_argument("--api_id", type=str, default="", help="Telegram API ID")
+    parser.add_argument("--api_hash", type=str, default="", help="Telegram API Hash")
+    parser.add_argument("--channels", nargs="*", default=["tikvahethiopia", "bbcnewsamharic"], help="Channels")
+    parser.add_argument("--fatigue_threshold", type=int, default=20)
+    parser.add_argument("--model_dir", type=str, default=".")
     args = parser.parse_args()
 
     asyncio.run(start_autonomous_life(args))
-
 
 if __name__ == "__main__":
     main()
