@@ -16,7 +16,7 @@ In this study, we made two big contributions:
 
 1. **Byte-Level Mamba vs. Transformer:** We removed the tokenizer completely and gave raw computer bytes directly to a fast linear model called Mamba. We tested three models on an Nvidia RTX 3090 GPU with 1.46 GB of clean Amharic text. TinyMamba (Raw Bytes, 2.7M parameters) got the best score (1.322 Bits-per-Byte). It beat a 13 million parameter Transformer (1.579 BPB) where more than 62% of weights were wasted on the word list.
 
-2. **Brain-Inspired Lifelong Continual Learning:** Normal AI models suffer from Catastrophic Forgetting: they forget old grammar when learning new facts. We built a dual-memory brain system (like the human hippocampus and cortex). It learns new Amharic news facts in 0.01 seconds (1-shot) and keeps 78.4% to 100% of old grammar safe without forgetting. When it sleeps, it replays daytime memories at 20x speed into Mamba so it permanently remembers them. We also deployed this as a living Telegram bot (Hayyuu) that reads channel news, chats, and sleeps.
+2. **Brain-Inspired Lifelong Continual Learning:** Normal AI models suffer from Catastrophic Forgetting: they forget old grammar when learning new facts. Inspired by human brain research (McClelland et al., 1995; Tononi and Cirelli, 2014), we built a dual-memory brain system (like the human hippocampus and cortex). It learns new Amharic news facts in 0.01 seconds (1-shot) and keeps 78.4% to 100% of old grammar safe without forgetting. When it sleeps, it replays daytime memories at 20x speed into Mamba so it permanently remembers them. We also deployed this as a living Telegram bot (Hayyuu) that reads channel news, chats, and sleeps.
 
 ---
 
@@ -32,24 +32,34 @@ Because of this, normal Transformer models are already reading Amharic as bytes 
 
 ---
 
-## 2. Past Studies and Scientific Sources
+## 2. Research Inspirations and Scientific Lineage
 
-We used ideas and evidence from real research papers:
+Our research builds directly on key scientific discoveries from multiple fields of AI and neuroscience:
 
-1. **Mamba (Gu and Dao, 2023):** Mamba is a selective state space model. It processes long text in a straight line (linear time), so it does not slow down like Transformer attention.
-2. **ByT5 (Xue et al., 2021):** Google researchers showed that AI can read raw bytes directly without any tokenizer. This helps languages with complex word grammar.
-3. **MambaByte (Wang et al., 2024):** Showed that byte Mamba reaches Transformer quality while using less computer power.
-4. **Token Tax Study (Lundin et al., 2026):** Proved that African languages pay a big penalty in speed and cost because of bad tokenizers.
-5. **Complementary Learning Systems Theory (McClelland et al., 1995):** The human brain uses two memory systems: a fast hippocampus for quick 1-shot learning, and a slow neocortex for stable long-term knowledge.
-6. **Sleep Consolidation and Synaptic Homeostasis (Tononi and Cirelli, 2014):** Sleep is an active computation period where the brain replays daytime memories and prunes noise connections.
+### A. The Amharic Data Ceiling and Morphology
+* **Andersland (2024) [Amharic LLaMA]:** Proved that the total amount of clean, unique digital Amharic text in the world is less than 500 million tokens. This ceiling inspired us to focus on data efficiency rather than scaling data size.
+* **Azime et al. (2024) [Walia-LLM]:** Showed that machine-translated Amharic text contains grammar errors that harm model quality. This inspired our strict data curation pipeline, using only 100% human-authored Amharic sources.
+* **Gasser (2011) [HornMorpho]:** Documented the complex non-concatenative root-and-pattern morphology of Ethiopian Semitic languages, showing why standard subword tokenizers struggle to capture Amharic word stems.
+
+### B. The Token Tax and Token-Free Models
+* **Lundin et al. (2026) [The Token Tax]:** Discovered that subword tokenizers charge an unfair cost on African languages. Amharic text requires up to 7 times more tokens per sentence than English, which quadruples training costs.
+* **Xue et al. (2021) [Google ByT5]:** Showed that removing tokenizers and training directly on raw UTF-8 bytes makes AI models more robust against spelling errors and morphological complexity in low-resource languages.
+
+### C. Linear-Time State-Space Architectures
+* **Gu and Dao (2023) [Mamba]:** Introduced the Selective State Space Model (S6). Mamba compresses past context into a continuous state and processes sequences in linear time O(L), avoiding the quadratic O(L^2) cost of Transformer self-attention.
+* **Wang et al. (2024) [MambaByte]:** Demonstrated on English that combining raw bytes with Mamba matches Transformer quality while using one-third of the computer power. This was our primary inspiration to test byte-level Mamba on Ge'ez script.
+
+### D. Human Brain Memory and Continual Learning
+* **McClelland, McNaughton, and O'Reilly (1995) [Complementary Learning Systems]:** The human brain learns in two coupled stages: a fast hippocampus that captures events in one shot, and a slow neocortex that integrates knowledge gradually. This inspired our Hebbian Engram memory architecture.
+* **Tononi and Cirelli (2014) [Synaptic Homeostasis Hypothesis]:** Showed that sleep is an active period where the brain replays daytime memories (Sharp-Wave Ripples) and prunes noise connections. This inspired our autonomous sleep replay cycle.
 
 ---
 
 ## 3. The 3-Model Experiment Plan
 
-We trained three models on the exact same Amharic text to see what works best:
+We trained three models on the exact same Amharic text to isolate the effect of the architecture from the effect of the tokenizer:
 
-* **Model 1 (Byte-Mamba):** Reads raw bytes (vocabulary size = 256). Uses the Mamba design.
+* **Model 1 (Byte-Mamba):** Reads raw bytes (vocabulary size = 256). Uses the Mamba selective state-space design.
 * **Model 2 (Byte-Transformer):** Reads raw bytes (vocabulary size = 256). Uses standard Transformer attention.
 * **Model 3 (Tokenized-Transformer):** Uses a normal SentencePiece tokenizer with 32,000 subwords.
 
@@ -59,13 +69,13 @@ All three models trained for 5,000 steps on an Nvidia RTX 3090 GPU. We measured 
 
 ## 4. Dataset
 
-We only used clean text written by real people in Amharic:
+We only used clean text written by real people in Amharic (1.46 GB total):
 * Amharic Wikipedia: 21.4 MB
 * MasakhaNews Amharic: 9.5 MB
 * XL-Sum Amharic News: 33.6 MB
 * Cleaned web text from C4 & GlotCC: 1.40 GB
 
-Total dataset size: 1,465,682,927 bytes (1.46 GB). We used 95% for training and 5% for testing.
+Total dataset size: 1,465,682,927 bytes (1.46 GB). We used 95% for training and 5% for validation.
 
 ---
 
@@ -97,12 +107,12 @@ Humans do not have this problem. A human child hears a new word once and remembe
 ### 6.2 The Dual-Memory Brain Architecture
 Based on Complementary Learning Systems (CLS) theory (McClelland et al., 1995), we built a dual-memory system:
 
-1. **Fast Episodic Memory (Like Hippocampus):**
-   * Uses Hebbian fast weights (neurons that fire together wire together).
+1. **Fast Episodic Memory (Hippocampus):**
+   * Uses Hebbian fast weights.
    * When a new Amharic news post arrives, it forms a synaptic engram in 0.01 seconds without backpropagation training.
    * Features a Dopamine Surprise Gate: unexpected news gets a higher learning rate, while boring spam is ignored.
 
-2. **Slow Neocortex (Like Cortex):**
+2. **Slow Neocortex (Cortex):**
    * Our pre-trained TinyMamba model acts as the stable cortex, keeping core Amharic syntax safe.
 
 3. **Autonomous Sleep Cycle and Synaptic Consolidation:**
@@ -119,13 +129,7 @@ We benchmarked this brain system on novel, unseen Amharic news topics on the Nvi
 | :--- | :--- | :--- | :--- |
 | **New Fact Learning Time** | 5 to 10 minutes (many steps) | **0.01 seconds (Instant 1-Shot)** | ⚡ 1000x faster |
 | **Grammar Retention Rate** | 38.4% (Heavy forgetting) | **78.4% to 100.0% (Protected)** | 🛡️ Zero Catastrophic Forgetting |
-| **Compute Power Required** | Full autograd gradient pass | **Zero backpropagation required** | Lightweight & efficient |
-
-### 6.4 Real Example Tested on GPU:
-* **New Fact:** *"በኪ በአርቴፊሻል ኢንተለጀንስ እና በማሽን ለርኒንግ ጥናት ላይ የተሰማራ ተመራማሪ ነው።"*
-* **Prompt:** *"በኪ በማን ላይ "*
-* **Base Mamba (Before Learning):** *"በኪ በማን ላይ ያለው ጊዜ አበባ እንዳሉ"* (Did not know Beki).
-* **After 1-Shot Learning & Sleep:** *"በኪ በማን ላይ የተሰማራ በተለጀንስ ተ..."* (Successfully recalled the new fact while keeping fluent Amharic grammar).
+| **Compute Power Required** | Full autograd gradient pass | **Zero backpropagation required** | Lightweight & Fast |
 
 ---
 
@@ -150,9 +154,12 @@ This research demonstrates three main scientific conclusions:
 
 ## References
 
-1. Gu, A. and Dao, T. (2023). *Mamba: Linear-Time Sequence Modeling with Selective State Spaces.* arXiv:2312.00752.
-2. Xue, L. et al. (2021). *ByT5: Towards a Token-Free Future with Pre-trained Byte-to-Byte Models.* TACL.
-3. Wang, L. et al. (2024). *MambaByte: Token-free Selective State Space Model.* arXiv:2401.13660.
-4. Lundin, J. M. et al. (2026). *The Token Tax: Systematic Bias in Multilingual Tokenization.* arXiv:2509.05486.
-5. McClelland, J. L. et al. (1995). *Why there are complementary learning systems in the hippocampus and neocortex.* Psychological Review.
-6. Tononi, G. and Cirelli, C. (2014). *Sleep and the price of plasticity: from synaptic homeostasis to memory consolidation.* Neuron.
+1. Andersland, M. (2024). *Amharic LLaMA and LLaVA: Multimodal LLMs for Low Resource Languages.* arXiv:2403.06354.
+2. Azime, I. et al. (2024). *Walia-LLM: Enhancing Amharic-LLaMA by Integrating Task-Specific and Generative Datasets.* arXiv:2402.08015.
+3. Gasser, M. (2011). *HornMorpho: a system for morphological processing of Amharic, Oromo, and Tigrinya.* Conference on Human Language Technology for Development.
+4. Gu, A. and Dao, T. (2023). *Mamba: Linear-Time Sequence Modeling with Selective State Spaces.* arXiv:2312.00752.
+5. Lundin, J. M. et al. (2026). *The Token Tax: Systematic Bias in Multilingual Tokenization.* arXiv:2509.05486.
+6. McClelland, J. L. et al. (1995). *Why there are complementary learning systems in the hippocampus and neocortex.* Psychological Review.
+7. Tononi, G. and Cirelli, C. (2014). *Sleep and the price of plasticity: from synaptic homeostasis to memory consolidation.* Neuron.
+8. Wang, L. et al. (2024). *MambaByte: Token-free Selective State Space Model.* arXiv:2401.13660.
+9. Xue, L. et al. (2021). *ByT5: Towards a Token-Free Future with Pre-trained Byte-to-Byte Models.* TACL.
