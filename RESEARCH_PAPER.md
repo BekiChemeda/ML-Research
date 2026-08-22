@@ -1,6 +1,6 @@
 # Byte-Level Mamba vs. Transformer for Amharic with Brain-Inspired Continual Learning
 
-**Author:** Bereket Chemeda  
+**Author:** Beknan Chemeda  
 **Project:** Data and Compute-Efficient Generative AI  
 **Code and Data:** https://github.com/BekiChemeda/ML-Research
 
@@ -16,7 +16,7 @@ In this study, we made two big contributions:
 
 1. **Byte-Level Mamba vs. Transformer:** We removed the tokenizer completely and gave raw computer bytes directly to a fast linear model called Mamba. We tested three models on an Nvidia RTX 3090 GPU with 1.46 GB of clean Amharic text. TinyMamba (Raw Bytes, 2.7M parameters) got the best score (1.322 Bits-per-Byte). It beat a 13 million parameter Transformer (1.579 BPB) where more than 62% of weights were wasted on the word list.
 
-2. **Brain-Inspired Lifelong Continual Learning:** Normal AI models suffer from Catastrophic Forgetting: they forget old grammar when learning new facts. We built a dual-memory brain system (like the human hippocampus and cortex). It learns new Amharic news facts in 0.01 seconds (1-shot) and keeps 78.4% to 100% of old grammar safe without forgetting. When it sleeps, it replays daytime memories at 20x speed into Mamba so it permanently remembers them. We also deployed this as a living Telegram bot (Aman) that reads channel news, chats, and sleeps.
+2. **Brain-Inspired Lifelong Continual Learning:** Normal AI models suffer from Catastrophic Forgetting: they forget old grammar when learning new facts. We built a dual-memory brain system (like the human hippocampus and cortex). It learns new Amharic news facts in 0.01 seconds (1-shot) and keeps 78.4% to 100% of old grammar safe without forgetting. When it sleeps, it replays daytime memories at 20x speed into Mamba so it permanently remembers them. We also deployed this as a living Telegram bot (Hayyuu) that reads channel news, chats, and sleeps.
 
 ---
 
@@ -129,9 +129,9 @@ We benchmarked this brain system on novel, unseen Amharic news topics on the Nvi
 
 ---
 
-## 7. Real-World Living Agent: Telegram Bot (Aman)
+## 7. Real-World Living Agent: Telegram Bot (Hayyuu)
 
-We connected this complete system to Telegram as a living agent named Aman:
+We connected this complete system to Telegram as a living agent named Hayyuu:
 * **Sensory Body:** Reads public Amharic channels (@tikvahethiopia, @bbcnewsamharic, @fana_broadcast).
 * **Live Ingestion:** Forms Hebbian engrams in real-time as news is posted.
 * **Metacognitive Chat:** When a user asks a question, it measures its predictive entropy. If uncertain, it uses human qualifiers like *"እንደሰማሁት ግን እርግጠኛ አይደለሁም፡..."*.

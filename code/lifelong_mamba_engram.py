@@ -232,6 +232,7 @@ class LifelongAmharicSystem:
         
         mem_module = self.memory if use_memory else None
         
+        stop_seq = [ord('<'), ord('/'), ord('s'), ord('>')]  # </s>
         for _ in range(max_new_tokens):
             logits, _ = self.model(idx, memory_module=mem_module)
             logits = logits[:, -1, :] / max(temperature, 1e-5)
@@ -241,6 +242,11 @@ class LifelongAmharicSystem:
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
             idx = torch.cat((idx, idx_next), dim=1)
+            
+            # Check for EOS stopping sequence
+            recent = idx[0, -len(stop_seq):].tolist()
+            if recent == stop_seq:
+                break
             
         return bytes(idx[0].cpu().tolist()).decode("utf-8", errors="replace")
 

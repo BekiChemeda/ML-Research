@@ -35,7 +35,7 @@ class BiologicalHumanPersona:
         self.cognitive_energy = 100.0   # 100% = Fully Awake, 0% = Must Sleep
         self.daily_experiences = []
         self.is_sleeping = False
-        self.name = "አማን (Aman)"
+        self.name = "Hayyuu"
         print(f"🌟 [{self.name}] Biological Human-Like Amharic Persona Born!")
 
     def perceive_post(self, channel_name, post_text):
@@ -185,9 +185,9 @@ async def start_autonomous_life(args):
         print("\n[Simulation Mode]: No bot_token provided. Simulating live life cycle:")
         persona.perceive_post("tikvahethiopia", "የኢትዮጵያ ንግድ ባንክ አዳዲስ ዲጂታል የክፍያ አገልግሎቶችን በይፋ አስመረቀ።")
         persona.perceive_post("bbcnewsamharic", "በአፍሪካ ቀንድ የተከሰተው የድርቅ አደጋ ለመከላከል አለም አቀፍ ድጋፍ ተጠየቀ።")
-        print("\nUser asks Aman: \"የኢትዮጵያ ንግድ ባንክ ምን አዲስ ነገር አደረገ?\"")
+        print("\nUser asks Hayyuu: \"የኢትዮጵያ ንግድ ባንክ ምን አዲስ ነገር አደረገ?\"")
         ans = persona.converse("በኪ", "የኢትዮጵያ ንግድ ባንክ ")
-        print(f"Aman Answer: {ans}\n")
+        print(f"Hayyuu Answer: {ans}\n")
         await persona.circadian_sleep_cycle(sleep_seconds=5)
 
 
