@@ -211,7 +211,7 @@ class LifelongAmharicSystem:
         # Load Pretrained Neocortex Weights (Mamba)
         ckpt_path = os.path.join(model_dir, "best_mamba.pt")
         if os.path.exists(ckpt_path):
-            ckpt = torch.load(ckpt_path, map_location=self.device)
+            ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
             self.model.load_state_dict(ckpt["model"])
             print(f"✓ Neocortex loaded: Pre-trained TinyMamba (Val BPB: {ckpt.get('val_bpb', 1.32):.3f})")
         else:
