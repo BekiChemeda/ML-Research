@@ -39,6 +39,7 @@ parser.add_argument("--d_state", type=int, default=16, help="Mamba state dimensi
 parser.add_argument("--lr", type=float, default=5e-4, help="Peak learning rate (default: 5e-4)")
 parser.add_argument("--min_lr", type=float, default=1e-5, help="Minimum learning rate (default: 1e-5)")
 parser.add_argument("--warmup_steps", type=int, default=250, help="Warmup steps (default: 250)")
+parser.add_argument("--tok_vocab_size", type=int, default=32000, help="SentencePiece BPE vocabulary size (default: 32000)")
 parser.add_argument("--eval_every", type=int, default=100, help="Evaluation interval (default: 100)")
 parser.add_argument("--data_dir", type=str, default="./data", help="Data directory (default: ./data)")
 parser.add_argument("--output_dir", type=str, default=".", help="Output directory for checkpoints/plots")
@@ -206,11 +207,11 @@ else:
 # ==============================================================================
 import sentencepiece as spm
 
-TOK_VOCAB_SIZE = 16000
-SP_PREFIX = os.path.join(args.data_dir, "amharic_sp")
+TOK_VOCAB_SIZE = args.tok_vocab_size
+SP_PREFIX = os.path.join(args.data_dir, f"amharic_sp_{TOK_VOCAB_SIZE//1000}k" if TOK_VOCAB_SIZE != 16000 else "amharic_sp")
 SP_MODEL_PATH = f"{SP_PREFIX}.model"
-TOK_TRAIN_PATH = os.path.join(args.data_dir, "tok_train.bin")
-TOK_VAL_PATH = os.path.join(args.data_dir, "tok_val.bin")
+TOK_TRAIN_PATH = os.path.join(args.data_dir, f"tok_train_{TOK_VOCAB_SIZE//1000}k.bin" if TOK_VOCAB_SIZE != 16000 else "tok_train.bin")
+TOK_VAL_PATH = os.path.join(args.data_dir, f"tok_val_{TOK_VOCAB_SIZE//1000}k.bin" if TOK_VOCAB_SIZE != 16000 else "tok_val.bin")
 
 if os.path.exists(TOK_TRAIN_PATH) and os.path.exists(TOK_VAL_PATH) and os.path.exists(SP_MODEL_PATH) and os.path.getsize(TOK_TRAIN_PATH) > 1000:
     sp = spm.SentencePieceProcessor(model_file=SP_MODEL_PATH)
