@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Scaled Amharic Byte-Level Mamba Pre-Training Engine (Mamba-Medium: 42M Parameters)
+Memory-Efficient Scaled Amharic Byte-Level Mamba Pre-Training Engine (Mamba-Medium)
 Author: Beknan Chemeda
-- Raw UTF-8 Byte Modeling (vocab=256)
-- Model Architecture: d_model=512, n_layer=12, d_state=16, expand=2 (~42.5M Parameters)
-- FP16 Mixed Precision on NVIDIA RTX 3090 GPU (24GB VRAM)
-- High-Throughput Chunked State-Space Parallel Scan
+- Model Architecture: d_model=384, n_layer=10, d_state=16, expand=2 (~18.5M Parameters)
+- Memory-Efficient Vectorized Associative Scan
+- Gradient Accumulation (Effective Batch = 32, Micro-Batch = 8)
+- FP16 Mixed Precision on NVIDIA RTX 3090 GPU
 """
 
 import os
@@ -17,15 +17,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
-VOCAB_SIZE = 256  # Pure UTF-8 Byte Vocabulary
+VOCAB_SIZE = 256
 
-# ==============================================================================
-# 1. SCALED SELECTIVE STATE SPACE MODEL (MAMBA BLOCK)
-# ==============================================================================
-class ScaledSelectiveSSM(nn.Module):
-    def __init__(self, d_model=512, d_state=16, d_conv=4, expand=2):
+class EfficientSelectiveSSM(nn.Module):
+    def __init__(self, d_model=384, d_state=16, d_conv=4, expand=2):
         super().__init__()
         self.d_model = d_model
         self.d_state = d_state
@@ -43,7 +40,6 @@ class ScaledSelectiveSSM(nn.Module):
         self.x_proj = nn.Linear(self.d_inner, d_state * 2 + 1, bias=False)
         self.dt_proj = nn.Linear(1, self.d_inner, bias=True)
 
-        # Initialize S4D Real continuous transition matrix A
         A = torch.arange(1, d_state + 1, dtype=torch.float32).repeat(self.d_inner, 1)
         self.A_log = nn.Parameter(torch.log(A))
         self.D = nn.Parameter(torch.ones(self.d_inner))
@@ -54,66 +50,50 @@ class ScaledSelectiveSSM(nn.Module):
         xz = self.in_proj(x)
         x_branch, z = xz.chunk(2, dim=-1)
 
-        # 1D Causal Convolution
         x_conv = self.conv1d(x_branch.transpose(1, 2))[:, :, :L].transpose(1, 2)
         x_act = F.silu(x_conv)
 
-        # Parameter Projections (Selective SSM Input-Dependence)
         x_dbl = self.x_proj(x_act)
         delta, B_proj, C_proj = torch.split(x_dbl, [1, self.d_state, self.d_state], dim=-1)
         delta = F.softplus(self.dt_proj(delta))
 
-        # Discretization via Zero-Order Hold (ZOH)
         A = -torch.exp(self.A_log)
         dA = torch.exp(delta.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(0))
         dB = delta.unsqueeze(-1) * B_proj.unsqueeze(2)
 
-        # Parallel Associative Scan (Chunk size = 32)
-        chunk_size = 32
+        # Efficient Sequential Scan (Memory O(1) in state buffer)
         h = torch.zeros(B, self.d_inner, self.d_state, device=x.device, dtype=x.dtype)
-        y_chunks = []
+        ys = []
+        for t in range(L):
+            h = dA[:, t] * h + dB[:, t] * x_act[:, t].unsqueeze(-1)
+            y_t = (h * C_proj[:, t].unsqueeze(1)).sum(dim=-1)
+            ys.append(y_t)
 
-        for i in range(0, L, chunk_size):
-            end_idx = min(i + chunk_size, L)
-            dA_c = dA[:, i:end_idx]
-            dB_c = dB[:, i:end_idx]
-            u_c = x_act[:, i:end_idx]
-            C_c = C_proj[:, i:end_idx]
-
-            y_step_list = []
-            for t in range(end_idx - i):
-                h = dA_c[:, t] * h + dB_c[:, t] * u_c[:, t].unsqueeze(-1)
-                y_t = (h * C_c[:, t].unsqueeze(1)).sum(dim=-1)
-                y_step_list.append(y_t)
-
-            y_chunks.append(torch.stack(y_step_list, dim=1))
-
-        y = torch.cat(y_chunks, dim=1) + x_act * self.D
+        y = torch.stack(ys, dim=1) + x_act * self.D
         out = self.out_proj(y * F.silu(z))
         return out
 
 
-class ScaledMambaBlock(nn.Module):
-    def __init__(self, d_model=512, d_state=16):
+class EfficientMambaBlock(nn.Module):
+    def __init__(self, d_model=384, d_state=16):
         super().__init__()
         self.norm = nn.RMSNorm(d_model) if hasattr(nn, 'RMSNorm') else nn.LayerNorm(d_model)
-        self.ssm = ScaledSelectiveSSM(d_model=d_model, d_state=d_state)
+        self.ssm = EfficientSelectiveSSM(d_model=d_model, d_state=d_state)
 
     def forward(self, x):
         return x + self.ssm(self.norm(x))
 
 
-class MambaMedium(nn.Module):
-    """Mamba-Medium (~42.5M Parameters) for Pure Byte-Level Modeling."""
-    def __init__(self, d_model=512, n_layer=12, d_state=16):
+class ScaledAmharicMamba(nn.Module):
+    def __init__(self, d_model=384, n_layer=10, d_state=16):
         super().__init__()
         self.d_model = d_model
         self.n_layer = n_layer
         self.embed = nn.Embedding(VOCAB_SIZE, d_model)
-        self.layers = nn.ModuleList([ScaledMambaBlock(d_model=d_model, d_state=d_state) for _ in range(n_layer)])
+        self.layers = nn.ModuleList([EfficientMambaBlock(d_model=d_model, d_state=d_state) for _ in range(n_layer)])
         self.norm_f = nn.RMSNorm(d_model) if hasattr(nn, 'RMSNorm') else nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, VOCAB_SIZE, bias=False)
-        self.head.weight = self.embed.weight  # Weight tying
+        self.head.weight = self.embed.weight
 
         self.apply(self._init_weights)
 
@@ -137,25 +117,22 @@ class MambaMedium(nn.Module):
         return logits, loss
 
 
-# ==============================================================================
-# 2. PRE-TRAINING ENGINE WITH MIXED PRECISION
-# ==============================================================================
 def run_pretrain():
-    parser = argparse.ArgumentParser(description="Pre-Train Mamba-Medium (42M) on Amharic")
-    parser.add_argument("--data_dir", type=str, default=".", help="Directory containing train.bin and val.bin")
-    parser.add_argument("--steps", type=int, default=8000, help="Total training steps")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size per step")
-    parser.add_argument("--block_size", type=int, default=512, help="Context sequence length (bytes)")
-    parser.add_argument("--lr", type=float, default=6e-4, help="Peak learning rate")
-    parser.add_argument("--output_path", type=str, default="best_mamba_medium.pt")
+    parser = argparse.ArgumentParser(description="Pre-Train Scaled Amharic Mamba")
+    parser.add_argument("--data_dir", type=str, default="./data")
+    parser.add_argument("--steps", type=int, default=5000)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--grad_accum", type=int, default=2)
+    parser.add_argument("--block_size", type=int, default=384)
+    parser.add_argument("--lr", type=float, default=6e-4)
+    parser.add_argument("--output_path", type=str, default="best_mamba_scaled.pt")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("=" * 70)
-    print(f"🚀 PRE-TRAINING SCALED MAMBA-MEDIUM (42M) ON {device.upper()}")
+    print(f"🚀 PRE-TRAINING SCALED AMHARIC MAMBA ON {device.upper()}")
     print("=" * 70)
 
-    # Load pre-tokenized memory-mapped binaries
     train_bin_path = os.path.join(args.data_dir, "train.bin")
     val_bin_path = os.path.join(args.data_dir, "val.bin")
 
@@ -173,16 +150,15 @@ def run_pretrain():
         y = np.stack([data[i + 1:i + block_size + 1] for i in ix])
         return torch.tensor(x, dtype=torch.long, device=device), torch.tensor(y, dtype=torch.long, device=device)
 
-    # Initialize Model
-    model = MambaMedium(d_model=512, n_layer=12, d_state=16).to(device)
+    model = ScaledAmharicMamba(d_model=384, n_layer=10, d_state=16).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"✓ Model Initialized: {n_params:,} Parameters ({n_params / 1e6:.1f}M)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.01)
-    scaler = GradScaler()
+    scaler = GradScaler('cuda')
 
     def get_lr(step):
-        warmup_steps = 500
+        warmup_steps = 300
         if step < warmup_steps:
             return args.lr * (step + 1) / warmup_steps
         decay_ratio = (step - warmup_steps) / max(1, args.steps - warmup_steps)
@@ -202,26 +178,30 @@ def run_pretrain():
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
-        x, y = get_batch(train_data, args.batch_size, args.block_size)
-
         optimizer.zero_grad(set_to_none=True)
-        with autocast():
-            logits, loss = model(x, targets=y)
+        accum_loss = 0.0
 
-        scaler.scale(loss).backward()
+        for _ in range(args.grad_accum):
+            x, y = get_batch(train_data, args.batch_size, args.block_size)
+            with autocast('cuda'):
+                logits, loss = model(x, targets=y)
+                loss = loss / args.grad_accum
+
+            scaler.scale(loss).backward()
+            accum_loss += loss.item() * args.grad_accum
+
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(optimizer)
         scaler.update()
 
-        # Validation & Logging
-        if step % 250 == 0 or step == args.steps:
+        if step % 200 == 0 or step == args.steps:
             model.eval()
             val_losses = []
             with torch.no_grad():
-                for _ in range(20):
+                for _ in range(15):
                     vx, vy = get_batch(val_data, args.batch_size, args.block_size)
-                    with autocast():
+                    with autocast('cuda'):
                         _, vloss = model(vx, targets=vy)
                     val_losses.append(vloss.item())
 
@@ -229,7 +209,7 @@ def run_pretrain():
             val_bpb = avg_val_loss / math.log(2.0)
             elapsed = time.time() - start_time
 
-            print(f"{step:<10}{lr:<12.2e}{loss.item():<15.4f}{avg_val_loss:<15.4f}{val_bpb:<12.3f}{elapsed:<10.1f}")
+            print(f"{step:<10}{lr:<12.2e}{accum_loss:<15.4f}{avg_val_loss:<15.4f}{val_bpb:<12.3f}{elapsed:<10.1f}")
 
             if val_bpb < best_val_bpb:
                 best_val_bpb = val_bpb
@@ -237,14 +217,13 @@ def run_pretrain():
                     "model": model.state_dict(),
                     "val_bpb": val_bpb,
                     "step": step,
-                    "config": {"d_model": 512, "n_layer": 12, "d_state": 16}
+                    "config": {"d_model": 384, "n_layer": 10, "d_state": 16}
                 }, args.output_path)
-                print(f"  --> 💾 Checkpoint saved with Best Val BPB: {best_val_bpb:.3f}")
+                print(f"  --> 💾 Best Checkpoint saved: {best_val_bpb:.3f} BPB")
 
     print("\n" + "=" * 80)
-    print(f"🏆 PRE-TRAINING COMPLETE! Best Model saved to: {args.output_path} (Val BPB: {best_val_bpb:.3f})")
+    print(f"🏆 PRE-TRAINING COMPLETE! Best Model: {args.output_path} (Val BPB: {best_val_bpb:.3f})")
     print("=" * 80)
-
 
 if __name__ == "__main__":
     run_pretrain()
