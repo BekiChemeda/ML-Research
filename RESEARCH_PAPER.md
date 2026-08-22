@@ -168,6 +168,10 @@ where k_t = normalize(W_k x_t), v_t = normalize(W_v x_t), gamma = 0.999 is memor
 #### Formula 5 (Dopamine Surprise Plasticity Gate):
 $$\eta_{\text{dopamine}} = \eta_0 \cdot \left( 1 + \tanh(\text{Surprise} - 2.0) \right)$$
 where Surprise = CrossEntropy(x) in BPB.
+```
+
+![Figure 2: Biological Brain Architecture](figures/fig5_brain_architecture.png)
+*Figure 2: Architecture diagram of the biological dual-memory system for Hayyuu (Hippocampus + Neocortex + Autonomous Sleep Replay).*
 
 #### Formula 6 (Epistemic Metacognition Uncertainty):
 $$H(x) = -\sum_{i=1}^V P(w_i) \log_2 P(w_i)$$
