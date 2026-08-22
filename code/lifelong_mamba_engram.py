@@ -204,6 +204,7 @@ class HebbianEngramMemory(nn.Module):
 # ==============================================================================
 class LifelongAmharicSystem:
     def __init__(self, model_dir=".", device=None):
+        self.model_dir = model_dir
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = TinyMamba(d_model=256, n_layer=6).to(self.device)
         self.memory = HebbianEngramMemory(d_model=256, mem_dim=128).to(self.device)
