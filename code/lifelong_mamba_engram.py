@@ -224,7 +224,7 @@ class LifelongAmharicSystem:
         self.memory.learn_fact(self.model, amharic_text, device=self.device)
 
     @torch.no_grad()
-    def generate(self, prompt, max_new_tokens=80, temperature=0.7, top_k=40, use_memory=True):
+    def generate(self, prompt, max_new_tokens=6000, temperature=0.7, top_k=40, use_memory=True):
         """Autoregressive generation with or without episodic Hebbian memory."""
         self.model.eval()
         p_bytes = list(prompt.encode("utf-8"))
@@ -299,7 +299,7 @@ def main():
     # Demo 1: Pre-training test
     test_prompt = "የኢትዮጵያ ታላቁ የህዳሴ ግድብ "
     print(f"\n[Initial Generation on prompt: \"{test_prompt}\"]")
-    print("  Base Mamba:", system.generate(test_prompt, max_new_tokens=50, use_memory=False))
+    print("  Base Mamba:", system.generate(test_prompt, max_new_tokens=600, use_memory=False))
 
     if args.interactive:
         while True:
@@ -314,8 +314,8 @@ def main():
                     system.teach(fact)
                 elif line.startswith("ask "):
                     prompt = line[4:].strip()
-                    with_mem = system.generate(prompt, max_new_tokens=60, use_memory=True)
-                    without_mem = system.generate(prompt, max_new_tokens=60, use_memory=False)
+                    with_mem = system.generate(prompt, max_new_tokens=600, use_memory=True)
+                    without_mem = system.generate(prompt, max_new_tokens=600, use_memory=False)
                     print(f"\n[With Hippocampal Memory]:\n  -> {with_mem}")
                     print(f"\n[Base Mamba Only (Without Memory)]:\n  -> {without_mem}")
                 elif line.lower() == "sleep":
@@ -324,7 +324,7 @@ def main():
                     system.memory.reset_memory()
                 else:
                     # Default is prompt completion
-                    print("\n-> " + system.generate(line, max_new_tokens=60, use_memory=True))
+                    print("\n-> " + system.generate(line, max_new_tokens=600, use_memory=True))
             except (KeyboardInterrupt, EOFError):
                 break
 

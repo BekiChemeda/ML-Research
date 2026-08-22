@@ -125,7 +125,7 @@ class AdvancedCognitiveBrain:
     # FEATURE 2: EPISTEMIC METACOGNITION & UNCERTAINTY ESTIMATION
     # --------------------------------------------------------------------------
     @torch.no_grad()
-    def generate_with_metacognition(self, prompt, max_tokens=70, temperature=0.7, top_k=40):
+    def generate_with_metacognition(self, prompt, max_tokens=600, temperature=0.7, top_k=40):
         """
         Generates Amharic text with human metacognition.
         Measures Shannon entropy across output distribution to detect uncertainty.
