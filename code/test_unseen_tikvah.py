@@ -70,7 +70,7 @@ def scrape_public_tikvah_posts(target_count=150):
 
 
 def compute_model_bpb(model, text, device="cuda", memory_module=None):
-    raw_bytes = list(text.encode("utf-8"))
+    raw_bytes = list(text.encode("utf-8"))[:512]
     if len(raw_bytes) < 2:
         return None
     x = torch.tensor([raw_bytes[:-1]], dtype=torch.long, device=device)
@@ -88,7 +88,7 @@ def compute_model_bpb(model, text, device="cuda", memory_module=None):
 
 
 def compute_tok_bpb(model, text, sp, fertility, device="cuda"):
-    ids = sp.encode(text, out_type=int)
+    ids = sp.encode(text, out_type=int)[:512]
     if len(ids) < 2:
         return None
     x = torch.tensor([ids[:-1]], dtype=torch.long, device=device)
