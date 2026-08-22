@@ -75,9 +75,22 @@ class BiologicalHumanPersona:
         if self.is_sleeping:
             return f"😴 ይቅርታ {user_name}፣ አሁን በእንቅልፍ (Memory Replay) ላይ ነኝ። ስነቃ በደንብ እናወራለን!"
 
-        prompt_fmt = f"<s>[USER] {user_prompt}\n[BOT] "
+        clean_p = user_prompt.strip().lower()
+
+        # 1. Core Identity Grounding (Hayyuu Persona)
+        identity_keywords = ["ስምህ", "ማን ነህ", "ማነህ", "ስምህን", "ማን ፈጠረህ", "ማን ሰራህ", "ፈጣሪህ", "who are you", "your name"]
+        if any(k in clean_p for k in identity_keywords):
+            return f"ስሜ {self.name} ይባላል። በቤክናን ጨመዳ (Beknan Chemeda) የተገነባሁ፣ በቴሌግራም ዜናዎችን እና መረጃዎችን በየቀኑ በራሴ እየተማርኩ የማድግ ህያው የአማርኛ AI ረዳት ነኝ።"
+
+        # 2. Natural Conversational Greeting Anchors
+        greeting_keywords = ["ሰላም", "እንደምን አለህ", "እንዴት ነህ", "ሰላም ነው", "ጤና ይስጥልኝ", "እንደምን አደርክ", "እንደምን ዋልክ", "hi", "hello"]
+        if clean_p in greeting_keywords or (len(clean_p) < 15 and any(clean_p.startswith(g) for g in greeting_keywords)):
+            return f"ሰላም {user_name}! ደህና ነህ? ዛሬ ምን አዲስ መረጃ ወይም ጥያቄ ልርዳህ?"
+
+        # 3. Neural Mamba Generation with Memory & Metacognition
+        prompt_fmt = f"<s>[SYSTEM] አንተ Hayyuu የተባልክ የቤክናን ጨመዳ ረዳት ነህ።\n[USER] {user_prompt}\n[BOT] "
         raw_resp = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.6, top_k=30, repetition_penalty=1.25, use_memory=True)
-        bot_ans = raw_resp.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").strip()
+        bot_ans = raw_resp.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").replace("[SYSTEM]", "").strip()
 
         # Fallback to fluent completion if template delimiter missing
         if not bot_ans:
