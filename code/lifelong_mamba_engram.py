@@ -299,11 +299,14 @@ class LifelongAmharicSystem:
         self.model.eval()
         print("☀️ [WAKE UP] Synaptic consolidation complete! Memories permanently wired into Mamba weights.\n")
 
-    def rl_reward_step(self, prompt, chosen_response, rejected_response=None, lr=1e-4):
+    def rl_reward_step(self, prompt, chosen_response, rejected_response=None, lr=2e-5):
         """
-        Direct Policy Gradient / DPO Human Feedback Step:
-        Strengthens chosen response likelihood and suppresses rejected response.
+        Direct Policy Gradient Human Feedback Step:
+        Strengthens chosen response likelihood using stable bounded gradients.
         """
+        if not chosen_response or len(chosen_response.strip()) < 2:
+            return 0.0
+
         self.model.train()
         opt = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
         
@@ -318,28 +321,17 @@ class LifelongAmharicSystem:
             
         opt.zero_grad()
         logits_chosen, _ = self.model(x_chosen)
-        loss_chosen = F.cross_entropy(logits_chosen.view(-1, logits_chosen.size(-1)), y_chosen.view(-1), ignore_index=-100)
-        total_loss = loss_chosen
+        loss = F.cross_entropy(logits_chosen.view(-1, logits_chosen.size(-1)), y_chosen.view(-1), ignore_index=-100)
         
-        if rejected_response:
-            seq_rejected = f"<s>[USER] {prompt}\n[BOT] {rejected_response}</s>\n".encode("utf-8")
-            x_rej = torch.tensor([list(seq_rejected[:-1])], dtype=torch.long, device=self.device)
-            y_rej = torch.full((1, len(seq_rejected) - 1), -100, dtype=torch.long, device=self.device)
-            for t in range(bot_start - 1, min(len(seq_rejected) - 1, y_rej.size(1))):
-                y_rej[0, t] = seq_rejected[t + 1]
-            logits_rej, _ = self.model(x_rej)
-            loss_rej = F.cross_entropy(logits_rej.view(-1, logits_rej.size(-1)), y_rej.view(-1), ignore_index=-100)
-            total_loss = loss_chosen - 0.2 * loss_rej
-            
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
         opt.step()
         self.model.eval()
         
         ckpt_path = os.path.join(self.model_dir, "best_mamba.pt")
         torch.save({"model": self.model.state_dict(), "rl_step": True}, ckpt_path)
-        print(f"✓ [RLHF POLICY STEP] Updated Mamba weights via human feedback (Loss: {total_loss.item():.4f})")
-        return total_loss.item()
+        print(f"✓ [RLHF POLICY STEP] Strengthened preference for: \"{chosen_response[:40]}...\" (Loss: {loss.item():.4f})")
+        return loss.item()
 
     def rl_reject_both(self, prompt, response_A, response_B, lr=5e-5):
         """Penalizes both bad candidate responses via negative policy gradient."""

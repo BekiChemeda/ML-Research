@@ -69,24 +69,30 @@ class BiologicalHumanPersona:
         if self.is_sleeping:
             return "😴 ይቅርታ አሁን በእንቅልፍ (Memory Consolidation) ላይ ነኝ። ስነቃ በደንብ እናወራለን!", "", ""
 
-        prompt_fmt = f"<s>[SYSTEM] አንተ {self.name} የተባልክ የ{self.creator} የአማርኛ ረዳት ነህ።\n[USER] {user_prompt}\n[BOT] "
+        prompt_fmt = f"<s>[USER] {user_prompt}\n[BOT] "
 
-        # Candidate A: Focused sampling (Temp 0.45, Top-k 25, Repetition Penalty 1.35)
-        raw_A = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.45, top_k=25, repetition_penalty=1.35, use_memory=True)
-        ans_A = raw_A.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").replace("[SYSTEM]", "").strip()
+        # Candidate A: Focused sampling (Temp 0.4, Top-k 25, Repetition Penalty 1.25)
+        raw_A = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.4, top_k=25, repetition_penalty=1.25, use_memory=True)
+        ans_A = raw_A.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").strip()
         if "።" in ans_A:
             ans_A = ans_A[:ans_A.rfind("።") + 1]
-        if not ans_A:
-            ans_A = "በዚህ ጉዳይ ላይ ተጨማሪ መረጃ በቅርቡ እሰጣለሁ።"
 
-        # Candidate B: Creative / Diverse sampling (Temp 0.75, Top-k 40, Repetition Penalty 1.25)
-        raw_B = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.75, top_k=40, repetition_penalty=1.25, use_memory=True)
-        ans_B = raw_B.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").replace("[SYSTEM]", "").strip()
+        # Candidate B: Creative / Diverse sampling (Temp 0.7, Top-k 35, Repetition Penalty 1.2)
+        raw_B = self.brain.generate(prompt_fmt, max_new_tokens=180, temperature=0.7, top_k=35, repetition_penalty=1.2, use_memory=True)
+        ans_B = raw_B.split("[BOT]")[-1].replace("</s>", "").replace("[USER]", "").strip()
         if "።" in ans_B:
             ans_B = ans_B[:ans_B.rfind("።") + 1]
+
+        # Ensure both candidates have valid distinct content
+        if not ans_A:
+            raw_fallback = self.brain.generate(f"{user_prompt} ", max_new_tokens=120, temperature=0.5, use_memory=True)
+            ans_A = raw_fallback.replace(user_prompt, "").strip()
+            if "።" in ans_A:
+                ans_A = ans_A[:ans_A.rfind("።") + 1]
+
         if not ans_B or ans_B == ans_A:
-            raw_fallback = self.brain.generate(user_prompt, max_new_tokens=120, temperature=0.8, use_memory=True)
-            ans_B = raw_fallback.replace(user_prompt, "").strip()
+            raw_fallback2 = self.brain.generate(f"{user_prompt} ", max_new_tokens=120, temperature=0.8, use_memory=True)
+            ans_B = raw_fallback2.replace(user_prompt, "").strip()
             if "።" in ans_B:
                 ans_B = ans_B[:ans_B.rfind("።") + 1]
 
