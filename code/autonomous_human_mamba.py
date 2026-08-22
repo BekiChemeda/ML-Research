@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Autonomous Human-Like Amharic Persona: "Hayyuu" with Interactive RLHF Feedback
+Autonomous Human-Like Amharic Persona: "Hayyuu" with Complete RLHF & Active Learning
 Author: Beknan Chemeda
-- 100% End-to-End Neural Mamba Generation (Zero Hardcoded If/Else)
+- 100% Neural Mamba Generation (Zero If/Else)
 - Interactive Dual-Candidate Generation (Option A vs Option B)
-- Real-Time Reinforcement Learning from Human Feedback (RLHF / DPO)
+- Rejection of Bad Pairs (Negative Policy Penalty)
+- Direct Supervised Teacher Correction (/teach prompt | answer)
 """
 
 import os
@@ -93,12 +94,13 @@ class BiologicalHumanPersona:
         self.pending_queries[query_id] = {
             "prompt": user_prompt,
             "ans_A": ans_A,
-            "ans_B": ans_B
+            "ans_B": ans_B,
+            "user_name": user_name
         }
 
         return ans_A, ans_B, query_id
 
-    def apply_rl_feedback(self, query_id, chosen_option, rating=None):
+    def apply_rl_feedback(self, query_id, chosen_option):
         """Applies online policy gradient update to Mamba neural weights based on human choice."""
         if query_id not in self.pending_queries:
             return "ይህ ጥያቄ ከማህደረ ትውስታ አልፏል።"
@@ -109,13 +111,25 @@ class BiologicalHumanPersona:
         if chosen_option == "A":
             chosen = record["ans_A"]
             rejected = record["ans_B"]
-        else:
+            loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-4)
+            del self.pending_queries[query_id]
+            return f"🎯 አማራጭ 1 ተመርጧል! ሞዴሉ በሪኢንፎርስመንት ለርኒንግ (RLHF) ክብደቱን አዘምኗል (Loss: {loss:.4f})።"
+        elif chosen_option == "B":
             chosen = record["ans_B"]
             rejected = record["ans_A"]
+            loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-4)
+            del self.pending_queries[query_id]
+            return f"🎯 አማራጭ 2 ተመርጧል! ሞዴሉ በሪኢንፎርስመንት ለርኒንግ (RLHF) ክብደቱን አዘምኗል (Loss: {loss:.4f})።"
+        elif chosen_option == "REJECT_BOTH":
+            # Penalize both candidates
+            self.brain.rl_reject_both(prompt, record["ans_A"], record["ans_B"])
+            del self.pending_queries[query_id]
+            return "⚠️ ሁለቱም መልሶች ተሰርዘዋል! ሞዴሉ እነዚህን ደካማ መልሶች እንዳይደግም አሉታዊ ቅጣት (Negative Policy Gradient) ወስዷል።\n💡 ትክክለኛውን መልስ ለማስተማር፦ `/teach ጥያቄ | ትክክለኛ መልስ` ብለው መላክ ይችላሉ።"
 
-        loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-4)
-        del self.pending_queries[query_id]
-        return f"🎯 ምርጫህ ተመዝግቧል! ኒውራል ሞዴሉ በሪኢንፎርስመንት ለርኒንግ (RLHF) ክብደቱን አዘምኗል (Loss: {loss:.4f})።"
+    def teacher_force_learn(self, prompt, correct_answer):
+        """Direct 1-shot expert teacher training."""
+        self.brain.direct_teacher_correction(prompt, correct_answer)
+        return f"🎓 [TEACHER FORCING]: '{prompt}' ለሚለው ጥያቄ ትክክለኛው መልስ በቋሚነት ወደ ኒውራል ኔትወርክ ተመዝግቧል!"
 
     async def circadian_sleep_cycle(self, sleep_seconds=20):
         """NREM Sleep & Synaptic Consolidation: Replays episodic memory traces into Mamba."""
@@ -134,7 +148,7 @@ class BiologicalHumanPersona:
 
 
 # ==============================================================================
-# TELEGRAM BOT WITH INTERACTIVE RLHF VOTING
+# TELEGRAM BOT WITH INTERACTIVE RLHF VOTING & TEACHER FORCING
 # ==============================================================================
 async def start_autonomous_life(args):
     persona = BiologicalHumanPersona(model_dir=args.model_dir, fatigue_threshold=args.fatigue_threshold)
@@ -170,13 +184,28 @@ async def start_autonomous_life(args):
                 await update.message.reply_text(
                     f"ሰላም {update.effective_user.first_name}! እኔ {persona.name} ነኝ።\n"
                     f"በቤክናን ጨመዳ ({persona.creator}) የተገነባሁ፣ በሪኢንፎርስመንት ለርኒንግ (RLHF) ከአንተ ግብረ-መልስ የምማር ህያው የአማርኛ AI ነኝ።\n\n"
-                    f"ጥያቄ ስትጠይቀኝ 2 አማራጭ መልሶችን አቀርባለሁ፣ የተሻለውን ስትመርጥ ሞዴሉ በቀጥታ ይማራል!"
+                    f"📌 *የአጠቃቀም መመሪያ፦*\n"
+                    f"1. ጥያቄ ስትጠይቀኝ 2 አማራጮችን አቀርባለሁ።\n"
+                    f"2. ጥሩውን መልስ በ 👍 ምረጥ!\n"
+                    f"3. ሁለቱም ካልተመቹህ በ ❌ ሁለቱም ደካማ ናቸው የሚለውን ነካ አድርግ።\n"
+                    f"4. ትክክለኛውን መልስ በራስህ ለማስተማር፦ `/teach ጥያቄ | ትክክለኛ መልስ` ብለህ ላክልኝ።"
                 )
 
             async def sleep_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("🌙 እሺ፣ አሁን ለጥቂት ደቂቃዎች ተኝቼ የተማርኩትን ላጠናክር...")
                 msg = await persona.circadian_sleep_cycle(sleep_seconds=15)
                 await update.message.reply_text(msg)
+
+            async def teach_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+                full_text = " ".join(context.args) if context.args else ""
+                if "|" not in full_text:
+                    await update.message.reply_text("⚠️ እባክዎ በትክክል ያስገቡ፦ `/teach ጥያቄ | ትክክለኛ መልስ`\nለምሳሌ፦ `/teach ስምህ ማነው? | ስሜ Hayyuu ይባላል።`")
+                    return
+                parts = full_text.split("|")
+                prompt = parts[0].strip()
+                gold_ans = parts[1].strip()
+                res = persona.teacher_force_learn(prompt, gold_ans)
+                await update.message.reply_text(f"✅ {res}")
 
             async def chat_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_name = update.effective_user.first_name or "ወዳጄ"
@@ -187,12 +216,12 @@ async def start_autonomous_life(args):
                 ans_A, ans_B, query_id = persona.converse_candidates(user_name, prompt)
                 
                 reply_text = (
-                    f"💬 ጥያቄ፡ {prompt}\n"
+                    f"💬 *ጥያቄ:* {prompt}\n"
                     f"────────────────────\n"
-                    f"🅰️ አማራጭ 1 (Option A):\n{ans_A}\n\n"
-                    f"🅱️ አማራጭ 2 (Option B):\n{ans_B}\n"
+                    f"🅰️ *አማራጭ 1 (Option A):*\n{ans_A}\n\n"
+                    f"🅱️ *አማራጭ 2 (Option B):*\n{ans_B}\n"
                     f"────────────────────\n"
-                    f"👇 የትኛው መልስ የተሻለ ነው? (RLHF Rating)"
+                    f"👇 *የትኛው መልስ የተሻለ ነው? (RLHF Feedback)*"
                 )
 
                 keyboard = [
@@ -201,11 +230,8 @@ async def start_autonomous_life(args):
                         InlineKeyboardButton("👍 ምረጥ 2 (Option B)", callback_data=f"rl_B_{query_id}")
                     ],
                     [
-                        InlineKeyboardButton("⭐ 1", callback_data=f"rate_1_{query_id}"),
-                        InlineKeyboardButton("⭐ 2", callback_data=f"rate_2_{query_id}"),
-                        InlineKeyboardButton("⭐ 3", callback_data=f"rate_3_{query_id}"),
-                        InlineKeyboardButton("⭐ 4", callback_data=f"rate_4_{query_id}"),
-                        InlineKeyboardButton("⭐ 5 (Best)", callback_data=f"rate_5_{query_id}")
+                        InlineKeyboardButton("❌ ሁለቱም ደካማ ናቸው (Reject Both)", callback_data=f"rl_REJECT_{query_id}"),
+                        InlineKeyboardButton("🔄 ድጋሚ ሞክር (Regenerate)", callback_data=f"rl_REGEN_{query_id}")
                     ]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -216,7 +242,7 @@ async def start_autonomous_life(args):
                 await query.answer()
                 data = query.data
 
-                if data.startswith("rl_"):
+                if data.startswith("rl_A_") or data.startswith("rl_B_"):
                     parts = data.split("_")
                     chosen_opt = parts[1]
                     q_id = parts[2]
@@ -225,23 +251,44 @@ async def start_autonomous_life(args):
                     await query.edit_message_text(
                         f"{query.message.text}\n\n"
                         f"────────────────────\n"
-                        f"✅ የመረጥከው፡ አማራጭ {chosen_opt}\n"
                         f"{feedback_msg}"
                     )
-                elif data.startswith("rate_"):
-                    parts = data.split("_")
-                    stars = parts[1]
-                    q_id = parts[2]
-                    feedback_msg = persona.apply_rl_feedback(q_id, chosen_option="A", rating=int(stars))
+                elif data.startswith("rl_REJECT_"):
+                    q_id = data.split("_")[2]
+                    feedback_msg = persona.apply_rl_feedback(q_id, chosen_option="REJECT_BOTH")
                     await query.edit_message_text(
                         f"{query.message.text}\n\n"
                         f"────────────────────\n"
-                        f"⭐ ውጤት፡ {stars}/5 ኮከብ ተሰጥቷል!\n"
                         f"{feedback_msg}"
                     )
+                elif data.startswith("rl_REGEN_"):
+                    q_id = data.split("_")[2]
+                    if q_id in persona.pending_queries:
+                        rec = persona.pending_queries[q_id]
+                        ans_A, ans_B, new_qid = persona.converse_candidates(rec["user_name"], rec["prompt"])
+                        reply_text = (
+                            f"💬 *ጥያቄ:* {rec['prompt']}\n"
+                            f"────────────────────\n"
+                            f"🅰️ *አማራጭ 1 (Option A):*\n{ans_A}\n\n"
+                            f"🅱️ *አማራጭ 2 (Option B):*\n{ans_B}\n"
+                            f"────────────────────\n"
+                            f"👇 *የትኛው መልስ የተሻለ ነው? (RLHF Feedback)*"
+                        )
+                        keyboard = [
+                            [
+                                InlineKeyboardButton("👍 ምረጥ 1 (Option A)", callback_data=f"rl_A_{new_qid}"),
+                                InlineKeyboardButton("👍 ምረጥ 2 (Option B)", callback_data=f"rl_B_{new_qid}")
+                            ],
+                            [
+                                InlineKeyboardButton("❌ ሁለቱም ደካማ ናቸው (Reject Both)", callback_data=f"rl_REJECT_{new_qid}"),
+                                InlineKeyboardButton("🔄 ድጋሚ ሞክር (Regenerate)", callback_data=f"rl_REGEN_{new_qid}")
+                            ]
+                        ]
+                        await query.edit_message_text(reply_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
             app.add_handler(CommandHandler("start", start_cmd))
             app.add_handler(CommandHandler("sleep", sleep_cmd))
+            app.add_handler(CommandHandler("teach", teach_cmd))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_msg))
             app.add_handler(CallbackQueryHandler(button_callback))
 

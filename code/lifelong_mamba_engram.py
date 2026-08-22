@@ -340,6 +340,45 @@ class LifelongAmharicSystem:
         print(f"✓ [RLHF POLICY STEP] Updated Mamba weights via human feedback (Loss: {total_loss.item():.4f})")
         return total_loss.item()
 
+    def rl_reject_both(self, prompt, response_A, response_B, lr=5e-5):
+        """Penalizes both bad candidate responses via negative policy gradient."""
+        self.model.train()
+        opt = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
+        
+        total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        for bad_resp in [response_A, response_B]:
+            if not bad_resp:
+                continue
+            seq = f"<s>[USER] {prompt}\n[BOT] {bad_resp}</s>\n".encode("utf-8")
+            bot_prefix = f"<s>[USER] {prompt}\n[BOT] ".encode("utf-8")
+            bot_start = min(len(bot_prefix), len(seq) - 1)
+            
+            x = torch.tensor([list(seq[:-1])], dtype=torch.long, device=self.device)
+            y = torch.full((1, len(seq) - 1), -100, dtype=torch.long, device=self.device)
+            for t in range(bot_start - 1, len(seq) - 1):
+                y[0, t] = seq[t + 1]
+                
+            logits, _ = self.model(x)
+            loss = -0.15 * F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-100)
+            total_loss = total_loss + loss
+            
+        opt.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        opt.step()
+        self.model.eval()
+        
+        ckpt_path = os.path.join(self.model_dir, "best_mamba.pt")
+        torch.save({"model": self.model.state_dict(), "rl_step": True}, ckpt_path)
+        print(f"✓ [RLHF NEGATIVE PENALTY] Penalized both bad responses")
+        return True
+
+    def direct_teacher_correction(self, prompt, gold_answer, lr=2e-4):
+        """Direct Supervised Teacher Forcing on human-provided correct answer."""
+        self.teach(f"{prompt}: {gold_answer}")
+        self.rl_reward_step(prompt, chosen_response=gold_answer, lr=lr)
+        return True
+
 
 def main():
     parser = argparse.ArgumentParser(description="Lifelong Continual Learning for Amharic")
