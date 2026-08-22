@@ -20,7 +20,7 @@ from torch.utils.data import Dataset, DataLoader
 
 # Add local path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from train import TinyMamba
+from lifelong_mamba_engram import TinyMamba
 
 # ==============================================================================
 # 1. THE AMHARIC CONSTITUTION
