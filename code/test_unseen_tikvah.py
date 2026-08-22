@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lifelong_mamba_engram import TinyMamba, HebbianEngramMemory, VOCAB_SIZE
-from train import TinyTransformer
+from generate import TinyTransformer
 
 def scrape_public_tikvah_posts(target_count=150):
     print(f"Scraping {target_count} older unseen posts from https://t.me/s/tikvahethiopia...")
