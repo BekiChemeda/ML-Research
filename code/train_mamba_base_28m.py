@@ -230,7 +230,8 @@ def train_mamba_base():
     parser = argparse.ArgumentParser(description="Pre-Train Amharic Mamba-Base (28.5M)")
     parser.add_argument("--data_dir", type=str, default="/workspace/ML-Research/code/data")
     parser.add_argument("--total_steps", type=int, default=10000)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=12)
+    parser.add_argument("--grad_accum", type=int, default=2)
     parser.add_argument("--seq_len", type=int, default=384)
     parser.add_argument("--lr_max", type=float, default=6e-4)
     parser.add_argument("--lr_min", type=float, default=3e-5)
@@ -288,7 +289,7 @@ def train_mamba_base():
         return avg_loss, bpb
 
     print("\n" + "=" * 70)
-    print(f"TRAINING IN PROGRESS: 0 -> {args.total_steps} Steps (Batch Size: {args.batch_size}, Seq: {args.seq_len})")
+    print(f"TRAINING IN PROGRESS: 0 -> {args.total_steps} Steps (Micro-Batch: {args.batch_size}, Accum: {args.grad_accum}, Effective Batch: {args.batch_size*args.grad_accum})")
     print("=" * 70)
 
     best_val_bpb = float('inf')
@@ -302,13 +303,18 @@ def train_mamba_base():
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
-        x, y = corpus.get_batch(batch_size=args.batch_size, split="train", device=device)
-
         optimizer.zero_grad(set_to_none=True)
-        with torch.amp.autocast('cuda'):
-            logits, loss = model(x, targets=y)
+        step_loss = 0.0
 
-        scaler.scale(loss).backward()
+        for _ in range(args.grad_accum):
+            x, y = corpus.get_batch(batch_size=args.batch_size, split="train", device=device)
+            with torch.amp.autocast('cuda'):
+                logits, loss = model(x, targets=y)
+                loss = loss / args.grad_accum
+
+            scaler.scale(loss).backward()
+            step_loss += loss.item() * args.grad_accum
+
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(optimizer)
@@ -319,7 +325,7 @@ def train_mamba_base():
             t_step_start = time.time()
             steps_per_sec = 50 / (step_time * 50) if step > 1 else 1.0 / step_time
             eta_mins = (args.total_steps - step) / max(steps_per_sec, 1e-4) / 60
-            print(f"Step {step:05d}/{args.total_steps} | Loss: {loss.item():.4f} ({loss.item()/math.log(2):.3f} BPB) | LR: {lr:.2e} | Speed: {steps_per_sec:.2f} st/s | ETA: {eta_mins:.1f}m", flush=True)
+            print(f"Step {step:05d}/{args.total_steps} | Loss: {step_loss:.4f} ({step_loss/math.log(2):.3f} BPB) | LR: {lr:.2e} | Speed: {steps_per_sec:.2f} st/s | ETA: {eta_mins:.1f}m", flush=True)
 
         if step % args.eval_interval == 0 or step == args.total_steps:
             val_loss, val_bpb = evaluate_val_loss(n_batches=30)
