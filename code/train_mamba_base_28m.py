@@ -149,10 +149,7 @@ class AmharicMambaBase(nn.Module):
     def forward(self, idx, targets=None, memory_module=None):
         x = self.embed(idx)
         for layer in self.layers:
-            if self.training:
-                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
-            else:
-                x = layer(x)
+            x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
         if memory_module is not None:
             x = memory_module(x)
         x = self.norm_f(x)
@@ -278,15 +275,17 @@ def train_mamba_base():
         return args.lr_min + (args.lr_max - args.lr_min) * cosine_decay
 
     @torch.no_grad()
-    def evaluate_val_loss(n_batches=30):
+    def evaluate_val_loss(n_batches=20):
         model.eval()
+        torch.cuda.empty_cache()
         total_val_loss = 0.0
         for _ in range(n_batches):
-            x_val, y_val = corpus.get_batch(batch_size=args.batch_size, split="val", device=device)
+            x_val, y_val = corpus.get_batch(batch_size=8, split="val", device=device)
             with torch.amp.autocast('cuda'):
                 _, loss = model(x_val, targets=y_val)
             total_val_loss += loss.item()
         model.train()
+        torch.cuda.empty_cache()
         avg_loss = total_val_loss / n_batches
         bpb = avg_loss / math.log(2)  # Nat to Bit conversion
         return avg_loss, bpb
