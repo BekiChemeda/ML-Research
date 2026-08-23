@@ -207,22 +207,27 @@ class AmharicMambaBase(nn.Module):
 # DATASET LOADER (STREAMING BYTE MEMORY-MAP)
 # ==============================================================================
 class AmharicByteCorpus:
-    def __init__(self, data_path, seq_len=384):
-        self.data_path = data_path
+    def __init__(self, data_dir="/workspace/ML-Research/code/data", seq_len=384):
+        self.data_dir = data_dir
         self.seq_len = seq_len
 
-        if not os.path.exists(data_path):
-            raise FileNotFoundError(f"Corpus file '{data_path}' not found!")
+        train_path = os.path.join(data_dir, "train.bin") if os.path.isdir(data_dir) else data_dir
+        val_path = os.path.join(data_dir, "val.bin") if os.path.isdir(data_dir) else None
 
-        self.file_size = os.path.getsize(data_path)
-        print(f"✓ Opened Corpus: '{data_path}' ({self.file_size / 1e6:.2f} MB / {self.file_size / 1e9:.3f} GB)")
-        self.mmap_data = np.memmap(data_path, dtype=np.uint8, mode='r')
+        if os.path.exists(train_path):
+            self.train_data = np.memmap(train_path, dtype=np.uint8, mode='r')
+            print(f"✓ Opened Train Corpus: '{train_path}' ({len(self.train_data)/1e6:.2f} MB / {len(self.train_data)/1e9:.3f} GB)")
+        else:
+            raise FileNotFoundError(f"Train corpus not found at '{train_path}'!")
 
-        # Split 95% Train, 5% Val
-        self.split_idx = int(len(self.mmap_data) * 0.95)
-        self.train_data = self.mmap_data[:self.split_idx]
-        self.val_data = self.mmap_data[self.split_idx:]
-        print(f"✓ Train Split: {len(self.train_data)/1e6:.1f} MB | Val Split: {len(self.val_data)/1e6:.1f} MB")
+        if val_path and os.path.exists(val_path):
+            self.val_data = np.memmap(val_path, dtype=np.uint8, mode='r')
+            print(f"✓ Opened Val Corpus: '{val_path}' ({len(self.val_data)/1e6:.2f} MB / {len(self.val_data)/1e9:.3f} GB)")
+        else:
+            split_idx = int(len(self.train_data) * 0.95)
+            self.val_data = self.train_data[split_idx:]
+            self.train_data = self.train_data[:split_idx]
+            print(f"✓ Split single corpus into Train: {len(self.train_data)/1e6:.1f} MB | Val: {len(self.val_data)/1e6:.1f} MB")
 
     def get_batch(self, batch_size=16, split="train", device="cuda"):
         data = self.train_data if split == "train" else self.val_data
@@ -240,7 +245,7 @@ class AmharicByteCorpus:
 # ==============================================================================
 def train_mamba_base():
     parser = argparse.ArgumentParser(description="Pre-Train Amharic Mamba-Base (28.5M)")
-    parser.add_argument("--data_path", type=str, default="/workspace/ML-Research/data/amharic_corpus_cleaned.bin")
+    parser.add_argument("--data_dir", type=str, default="/workspace/ML-Research/code/data")
     parser.add_argument("--total_steps", type=int, default=10000)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--seq_len", type=int, default=384)
@@ -272,7 +277,7 @@ def train_mamba_base():
     print(f"✓ Active Trainable Parameters: {param_count:,} ({param_count/1e6:.2f}M)")
 
     # 2. Corpus Loader
-    corpus = AmharicByteCorpus(args.data_path, seq_len=args.seq_len)
+    corpus = AmharicByteCorpus(args.data_dir, seq_len=args.seq_len)
 
     # 3. Optimizer & Schedulers
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr_max, betas=(0.9, 0.95), weight_decay=0.05)
