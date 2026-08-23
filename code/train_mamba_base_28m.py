@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-Pre-Training Script for Amharic Mamba-Base (28.5M Parameters, 10,000 Steps)
+Pre-Training Script for Amharic Mamba-Base (21.1M Parameters, 10,000 Steps)
 ==========================================================================
 Architecture:
 - d_model: 512
 - n_layer: 16
 - d_state: 16
-- d_conv: 4
-- expand: 2 (d_inner = 1024)
 - Chunked Associative Parallel Scan (chunk_size=32)
-- Mixed Precision (AMP FP16 / BF16)
+- Mixed Precision (AMP FP16)
 - Gradient Clipping: 1.0
 - Cosine LR Warmup & Decay (6e-4 -> 3e-5)
+- Standardized normal initialization (std=0.02)
 
 Author: Beknan Chemeda / AI Research Team
 """
@@ -26,8 +25,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+VOCAB_SIZE = 256
+
+
 # ==============================================================================
-# FAST CHUNKED PARALLEL SELECTIVE SCAN
+# FAST CHUNKED ASSOCIATIVE SCAN
 # ==============================================================================
 def selective_scan_parallel(x_conv, delta, A, Bp, Cp, D, chunk_size=32):
     B, L, d_inner = x_conv.shape
@@ -62,101 +64,100 @@ def selective_scan_parallel(x_conv, delta, A, Bp, Cp, D, chunk_size=32):
     return y + x_conv * D
 
 
-# ==============================================================================
-# MAMBA-BASE BLOCK & NEURAL NETWORK
-# ==============================================================================
-class MambaBaseBlock(nn.Module):
+class FastSelectiveSSM(nn.Module):
     def __init__(self, d_model=512, d_state=16, d_conv=4, expand=2):
         super().__init__()
         self.d_model = d_model
         self.d_state = d_state
-        self.d_inner = int(expand * d_model)  # 1024
-        self.dt_rank = math.ceil(d_model / 16)  # 32
+        self.d_inner = d_model * expand
+        self.d_conv = d_conv
 
-        self.norm = nn.RMSNorm(d_model)
         self.in_proj = nn.Linear(d_model, self.d_inner * 2, bias=False)
         self.conv1d = nn.Conv1d(
             in_channels=self.d_inner,
             out_channels=self.d_inner,
             kernel_size=d_conv,
-            padding=d_conv - 1,
             groups=self.d_inner,
+            padding=d_conv - 1,
             bias=True
         )
-        self.x_proj = nn.Linear(self.d_inner, self.dt_rank + d_state * 2, bias=False)
-        self.dt_proj = nn.Linear(self.dt_rank, self.d_inner, bias=True)
+        self.x_proj = nn.Linear(self.d_inner, 1 + d_state * 2, bias=False)
+        self.dt_proj = nn.Linear(1, self.d_inner, bias=True)
 
-        A_init = torch.repeat_interleave(torch.arange(1, d_state + 1, dtype=torch.float32).unsqueeze(0), self.d_inner, dim=0)
+        A_init = torch.repeat_interleave(
+            torch.arange(1, d_state + 1, dtype=torch.float32).unsqueeze(0),
+            self.d_inner,
+            dim=0
+        )
         self.A_log = nn.Parameter(torch.log(A_init))
         self.D = nn.Parameter(torch.ones(self.d_inner))
         self.out_proj = nn.Linear(self.d_inner, d_model, bias=False)
 
     def forward(self, x):
-        residual = x
-        x_norm = self.norm(x)
-        
-        # in_proj -> split into branch and gate
-        xz = self.in_proj(x_norm)
+        B, L, D = x.shape
+        xz = self.in_proj(x)
         x_branch, z = xz.chunk(2, dim=-1)
 
-        # 1D causal convolution
-        L = x.shape[1]
         x_conv = self.conv1d(x_branch.transpose(1, 2))[:, :, :L].transpose(1, 2)
         x_act = F.silu(x_conv)
 
-        # SSM projections
-        ssm_p = self.x_proj(x_act)
-        delta_raw, Bp, Cp = torch.split(ssm_p, [self.dt_rank, self.d_state, self.d_state], dim=-1)
-        delta = F.softplus(self.dt_proj(delta_raw))
+        x_dbl = self.x_proj(x_act)
+        delta, Bp, Cp = torch.split(x_dbl, [1, self.d_state, self.d_state], dim=-1)
+        delta = F.softplus(self.dt_proj(delta))
         A = torch.exp(self.A_log)
 
-        # Parallel chunked scan
-        y_ssm = selective_scan_parallel(x_act, delta, A, Bp, Cp, self.D, chunk_size=32)
+        y = selective_scan_parallel(x_act, delta, A, Bp, Cp, self.D, chunk_size=32)
+        out = self.out_proj(y * F.silu(z))
+        return out
 
-        # Gated output projection
-        y_gated = y_ssm * F.silu(z)
-        out = self.out_proj(y_gated)
-        return residual + out
+
+class FastMambaBlock(nn.Module):
+    def __init__(self, d_model=512, d_state=16):
+        super().__init__()
+        self.norm = nn.RMSNorm(d_model) if hasattr(nn, 'RMSNorm') else nn.LayerNorm(d_model)
+        self.ssm = FastSelectiveSSM(d_model=d_model, d_state=d_state)
+
+    def forward(self, x):
+        return x + self.ssm(self.norm(x))
 
 
 class AmharicMambaBase(nn.Module):
-    def __init__(self, vocab_size=256, d_model=512, n_layer=16, d_state=16, d_conv=4, expand=2):
+    def __init__(self, d_model=512, n_layer=16, d_state=16):
         super().__init__()
         self.d_model = d_model
         self.n_layer = n_layer
-        self.vocab_size = vocab_size
+        self.embed = nn.Embedding(VOCAB_SIZE, d_model)
+        self.layers = nn.ModuleList([FastMambaBlock(d_model=d_model, d_state=d_state) for _ in range(n_layer)])
+        self.norm_f = nn.RMSNorm(d_model) if hasattr(nn, 'RMSNorm') else nn.LayerNorm(d_model)
+        self.head = nn.Linear(d_model, VOCAB_SIZE, bias=False)
+        self.head.weight = self.embed.weight
 
-        self.embed = nn.Embedding(vocab_size, d_model)
-        self.layers = nn.ModuleList([
-            MambaBaseBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-            for _ in range(n_layer)
-        ])
-        self.norm_f = nn.RMSNorm(d_model)
-        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
-        self.lm_head.weight = self.embed.weight  # Weight tying
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        elif isinstance(module, (nn.LayerNorm, nn.RMSNorm)):
+            if hasattr(module, 'bias') and module.bias is not None:
+                nn.init.zeros_(module.bias)
+            if hasattr(module, 'weight') and module.weight is not None:
+                nn.init.ones_(module.weight)
 
     def count_parameters(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def forward(self, input_ids, targets=None, memory_module=None):
-        x = self.embed(input_ids)
+    def forward(self, idx, targets=None, memory_module=None):
+        x = self.embed(idx)
         for layer in self.layers:
-            if self.training:
-                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
-            else:
-                x = layer(x)
-
-        x = self.norm_f(x)
-
+            x = layer(x)
         if memory_module is not None:
-            mem_bias = memory_module(x)
-            x = x + mem_bias
-
-        logits = self.lm_head(x)
+            x = memory_module(x)
+        x = self.norm_f(x)
+        logits = self.head(x)
 
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, self.vocab_size), targets.view(-1), ignore_index=-100)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-100)
 
         return logits, loss
 
@@ -230,11 +231,10 @@ class AmharicByteCorpus:
 # MAIN PRE-TRAINING LOOP
 # ==============================================================================
 def train_mamba_base():
-    parser = argparse.ArgumentParser(description="Pre-Train Amharic Mamba-Base (28.5M)")
+    parser = argparse.ArgumentParser(description="Pre-Train Amharic Mamba-Base (21.1M)")
     parser.add_argument("--data_dir", type=str, default="/workspace/ML-Research/code/data")
     parser.add_argument("--total_steps", type=int, default=10000)
-    parser.add_argument("--batch_size", type=int, default=12)
-    parser.add_argument("--grad_accum", type=int, default=2)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--seq_len", type=int, default=384)
     parser.add_argument("--lr_max", type=float, default=6e-4)
     parser.add_argument("--lr_min", type=float, default=3e-5)
@@ -245,7 +245,7 @@ def train_mamba_base():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("=" * 70)
-    print("🚀 PRE-TRAINING AMHARIC MAMBA-BASE (28.5M PARAMETERS, 10,000 STEPS)")
+    print("🚀 PRE-TRAINING AMHARIC MAMBA-BASE (21.1M PARAMETERS, 10,000 STEPS)")
     print(f"   Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     print("=" * 70)
 
@@ -253,10 +253,7 @@ def train_mamba_base():
     config = {
         "d_model": 512,
         "n_layer": 16,
-        "d_state": 16,
-        "d_conv": 4,
-        "expand": 2,
-        "vocab_size": 256
+        "d_state": 16
     }
     model = AmharicMambaBase(**config).to(device)
     param_count = model.count_parameters()
@@ -292,7 +289,7 @@ def train_mamba_base():
         return avg_loss, bpb
 
     print("\n" + "=" * 70)
-    print(f"TRAINING IN PROGRESS: 0 -> {args.total_steps} Steps (Micro-Batch: {args.batch_size}, Accum: {args.grad_accum}, Effective Batch: {args.batch_size*args.grad_accum})")
+    print(f"TRAINING IN PROGRESS: 0 -> {args.total_steps} Steps (Batch Size: {args.batch_size}, Seq: {args.seq_len})")
     print("=" * 70)
 
     best_val_bpb = float('inf')
@@ -306,18 +303,13 @@ def train_mamba_base():
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
+        x, y = corpus.get_batch(batch_size=args.batch_size, split="train", device=device)
+
         optimizer.zero_grad(set_to_none=True)
-        step_loss = 0.0
+        with torch.amp.autocast('cuda'):
+            logits, loss = model(x, targets=y)
 
-        for _ in range(args.grad_accum):
-            x, y = corpus.get_batch(batch_size=args.batch_size, split="train", device=device)
-            with torch.amp.autocast('cuda'):
-                logits, loss = model(x, targets=y)
-                loss = loss / args.grad_accum
-
-            scaler.scale(loss).backward()
-            step_loss += loss.item() * args.grad_accum
-
+        scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(optimizer)
@@ -328,7 +320,7 @@ def train_mamba_base():
             t_step_start = time.time()
             steps_per_sec = 50 / (step_time * 50) if step > 1 else 1.0 / step_time
             eta_mins = (args.total_steps - step) / max(steps_per_sec, 1e-4) / 60
-            print(f"Step {step:05d}/{args.total_steps} | Loss: {step_loss:.4f} ({step_loss/math.log(2):.3f} BPB) | LR: {lr:.2e} | Speed: {steps_per_sec:.2f} st/s | ETA: {eta_mins:.1f}m", flush=True)
+            print(f"Step {step:05d}/{args.total_steps} | Loss: {loss.item():.4f} ({loss.item()/math.log(2):.3f} BPB) | LR: {lr:.2e} | Speed: {steps_per_sec:.2f} st/s | ETA: {eta_mins:.1f}m", flush=True)
 
         if step % args.eval_interval == 0 or step == args.total_steps:
             val_loss, val_bpb = evaluate_val_loss(n_batches=30)
