@@ -318,6 +318,8 @@ class LifelongAmharicSystem:
         self.model.eval()
         print("☀️ [WAKE UP] Synaptic consolidation complete! Memories permanently wired into Mamba weights.\n")
 
+    sleep_and_consolidate = sleep_consolidation
+
     def rl_reward_step(self, prompt, chosen_response, rejected_response=None, lr=1e-5):
         """
         Safe Online RLHF Policy Gradient with Replay Buffer Anchoring.

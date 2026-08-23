@@ -257,7 +257,7 @@ def run_autonomous_teaching_loop(model_dir=".", max_rounds=None, interval_sec=1.
             # 4. Nightly Synaptic Consolidation Sleep Cycle every 30 rounds
             if round_idx % 30 == 0:
                 print(f"\n🌙 [CIRCADIAN CYCLE] Round #{round_idx}: Initiating Synaptic Consolidation Sleep...", flush=True)
-                system.sleep_and_consolidate(epochs=2, lr=5e-5)
+                system.sleep_consolidation(steps=30, lr=5e-5)
                 ledger["sleep_cycles_completed"] += 1
                 print(f"☀️ [AWAKE] Consolidated {len(system.memory.memory_records)} episodic memories into Mamba Neocortex!\n", flush=True)
 
