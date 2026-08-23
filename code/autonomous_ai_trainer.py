@@ -187,6 +187,11 @@ def run_autonomous_teaching_loop(model_dir=".", max_rounds=None, interval_sec=1.
             ans_B = system.generate(prompt_formatted, max_new_tokens=150, temperature=0.85, use_memory=True).strip()
 
             # Clean output tags
+            if "[BOT] " in ans_A:
+                ans_A = ans_A.split("[BOT] ")[-1]
+            if "[BOT] " in ans_B:
+                ans_B = ans_B.split("[BOT] ")[-1]
+
             ans_A = ans_A.split("</s>")[0].split("\n[USER]")[0].strip()
             ans_B = ans_B.split("</s>")[0].split("\n[USER]")[0].strip()
 
