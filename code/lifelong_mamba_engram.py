@@ -210,11 +210,21 @@ class LifelongAmharicSystem:
         self.model_dir = model_dir
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Check if Scaled Mamba is available
+        # Check if Base Mamba (26.24M), Scaled Mamba (9.4M), or Tiny Mamba is available
+        base_ckpt_path = os.path.join(model_dir, "best_mamba_base_28m.pt")
         scaled_ckpt_path = os.path.join(model_dir, "best_mamba_scaled.pt")
         tiny_ckpt_path = os.path.join(model_dir, "best_mamba.pt")
         
-        if os.path.exists(scaled_ckpt_path):
+        if os.path.exists(base_ckpt_path):
+            from train_mamba_base_28m import AmharicMambaBase
+            ckpt = torch.load(base_ckpt_path, map_location=self.device, weights_only=False)
+            cfg = ckpt.get("config", {"d_model": 512, "n_layer": 16, "d_state": 16})
+            self.model = AmharicMambaBase(d_model=cfg.get("d_model", 512), n_layer=cfg.get("n_layer", 16), d_state=cfg.get("d_state", 16)).to(self.device)
+            self.memory = HebbianEngramMemory(d_model=cfg.get("d_model", 512), mem_dim=256).to(self.device)
+            self.model.load_state_dict(ckpt["model"])
+            self.ckpt_path = base_ckpt_path
+            print(f"✓ Neocortex loaded: Amharic Mamba-Base ({cfg.get('d_model', 512)}d, {cfg.get('n_layer', 16)}L, SFT Loss: {ckpt.get('sft_val_bpb', ckpt.get('val_bpb', 0.69)):.3f} BPB)")
+        elif os.path.exists(scaled_ckpt_path):
             from scale_mamba_42m import ScaledAmharicMamba
             ckpt = torch.load(scaled_ckpt_path, map_location=self.device, weights_only=False)
             cfg = ckpt.get("config", {"d_model": 384, "n_layer": 10, "d_state": 16})
@@ -231,11 +241,11 @@ class LifelongAmharicSystem:
             self.ckpt_path = tiny_ckpt_path
             print(f"✓ Neocortex loaded: Pre-trained TinyMamba (Val BPB: {ckpt.get('val_bpb', 1.32):.3f})")
         else:
-            from scale_mamba_42m import ScaledAmharicMamba
-            self.model = ScaledAmharicMamba(d_model=384, n_layer=10).to(self.device)
-            self.memory = HebbianEngramMemory(d_model=384, mem_dim=192).to(self.device)
-            self.ckpt_path = os.path.join(model_dir, "best_mamba_scaled.pt")
-            print("Warning: Checkpoint not found, initializing fresh weights.")
+            from train_mamba_base_28m import AmharicMambaBase
+            self.model = AmharicMambaBase(d_model=512, n_layer=16, d_state=16).to(self.device)
+            self.memory = HebbianEngramMemory(d_model=512, mem_dim=256).to(self.device)
+            self.ckpt_path = os.path.join(model_dir, "best_mamba_base_28m.pt")
+            print("Warning: Checkpoint not found, initializing fresh Mamba-Base weights.")
             
         self.model.eval()
 
