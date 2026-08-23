@@ -282,19 +282,21 @@ async def start_autonomous_life(args):
                                 f"🅰️ *አማራጭ 1 (Option A):*\n{ans_A}\n\n"
                                 f"🅱️ *አማራጭ 2 (Option B):*\n{ans_B}\n"
                                 f"────────────────────\n"
-                            f"👇 *የትኛው መልስ የተሻለ ነው? (RLHF Feedback)*"
-                        )
-                        keyboard = [
-                            [
-                                InlineKeyboardButton("👍 ምረጥ 1 (Option A)", callback_data=f"rl_A_{new_qid}"),
-                                InlineKeyboardButton("👍 ምረጥ 2 (Option B)", callback_data=f"rl_B_{new_qid}")
-                            ],
-                            [
-                                InlineKeyboardButton("❌ ሁለቱም ደካማ ናቸው (Reject Both)", callback_data=f"rl_REJECT_{new_qid}"),
-                                InlineKeyboardButton("🔄 ድጋሚ ሞክር (Regenerate)", callback_data=f"rl_REGEN_{new_qid}")
+                                f"👇 *የትኛው መልስ የተሻለ ነው? (RLHF Feedback)*"
+                            )
+                            keyboard = [
+                                [
+                                    InlineKeyboardButton("👍 ምረጥ 1 (Option A)", callback_data=f"rl_A_{new_qid}"),
+                                    InlineKeyboardButton("👍 ምረጥ 2 (Option B)", callback_data=f"rl_B_{new_qid}")
+                                ],
+                                [
+                                    InlineKeyboardButton("❌ ሁለቱም ደካማ ናቸው (Reject Both)", callback_data=f"rl_REJECT_{new_qid}"),
+                                    InlineKeyboardButton("🔄 ድጋሚ ሞክር (Regenerate)", callback_data=f"rl_REGEN_{new_qid}")
+                                ]
                             ]
-                        ]
-                        await query.edit_message_text(reply_text, reply_markup=InlineKeyboardMarkup(keyboard))
+                            await query.edit_message_text(reply_text, reply_markup=InlineKeyboardMarkup(keyboard))
+                except Exception as e:
+                    print(f"Error handling callback: {e}", flush=True)
 
             app.add_handler(CommandHandler("start", start_cmd))
             app.add_handler(CommandHandler("sleep", sleep_cmd))
