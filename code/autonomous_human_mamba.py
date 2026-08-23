@@ -117,13 +117,13 @@ class BiologicalHumanPersona:
         if chosen_option == "A":
             chosen = record["ans_A"]
             rejected = record["ans_B"]
-            loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-4)
+            loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-5)
             del self.pending_queries[query_id]
             return f"🎯 አማራጭ 1 ተመርጧል! ሞዴሉ በሪኢንፎርስመንት ለርኒንግ (RLHF) ክብደቱን አዘምኗል (Loss: {loss:.4f})።"
         elif chosen_option == "B":
             chosen = record["ans_B"]
             rejected = record["ans_A"]
-            loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-4)
+            loss = self.brain.rl_reward_step(prompt, chosen_response=chosen, rejected_response=rejected, lr=1e-5)
             del self.pending_queries[query_id]
             return f"🎯 አማራጭ 2 ተመርጧል! ሞዴሉ በሪኢንፎርስመንት ለርኒንግ (RLHF) ክብደቱን አዘምኗል (Loss: {loss:.4f})።"
         elif chosen_option == "REJECT_BOTH":
@@ -214,10 +214,10 @@ async def start_autonomous_life(args):
                 await update.message.reply_text(f"✅ {res}")
 
             async def chat_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+                if not update.message or not update.message.text:
+                    return
                 user_name = update.effective_user.first_name or "ወዳጄ"
                 prompt = update.message.text
-                if not prompt:
-                    return
 
                 ans_A, ans_B, query_id = persona.converse_candidates(user_name, prompt)
                 
@@ -245,39 +245,43 @@ async def start_autonomous_life(args):
 
             async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 query = update.callback_query
-                await query.answer()
+                try:
+                    await query.answer()
+                except Exception:
+                    pass
                 data = query.data
 
-                if data.startswith("rl_A_") or data.startswith("rl_B_"):
-                    parts = data.split("_")
-                    chosen_opt = parts[1]
-                    q_id = parts[2]
-                    
-                    feedback_msg = persona.apply_rl_feedback(q_id, chosen_option=chosen_opt)
-                    await query.edit_message_text(
-                        f"{query.message.text}\n\n"
-                        f"────────────────────\n"
-                        f"{feedback_msg}"
-                    )
-                elif data.startswith("rl_REJECT_"):
-                    q_id = data.split("_")[2]
-                    feedback_msg = persona.apply_rl_feedback(q_id, chosen_option="REJECT_BOTH")
-                    await query.edit_message_text(
-                        f"{query.message.text}\n\n"
-                        f"────────────────────\n"
-                        f"{feedback_msg}"
-                    )
-                elif data.startswith("rl_REGEN_"):
-                    q_id = data.split("_")[2]
-                    if q_id in persona.pending_queries:
-                        rec = persona.pending_queries[q_id]
-                        ans_A, ans_B, new_qid = persona.converse_candidates(rec["user_name"], rec["prompt"])
-                        reply_text = (
-                            f"💬 *ጥያቄ:* {rec['prompt']}\n"
+                try:
+                    if data.startswith("rl_A_") or data.startswith("rl_B_"):
+                        parts = data.split("_")
+                        chosen_opt = parts[1]
+                        q_id = parts[2]
+                        
+                        feedback_msg = persona.apply_rl_feedback(q_id, chosen_option=chosen_opt)
+                        await query.edit_message_text(
+                            f"{query.message.text}\n\n"
                             f"────────────────────\n"
-                            f"🅰️ *አማራጭ 1 (Option A):*\n{ans_A}\n\n"
-                            f"🅱️ *አማራጭ 2 (Option B):*\n{ans_B}\n"
+                            f"{feedback_msg}"
+                        )
+                    elif data.startswith("rl_REJECT_"):
+                        q_id = data.split("_")[2]
+                        feedback_msg = persona.apply_rl_feedback(q_id, chosen_option="REJECT_BOTH")
+                        await query.edit_message_text(
+                            f"{query.message.text}\n\n"
                             f"────────────────────\n"
+                            f"{feedback_msg}"
+                        )
+                    elif data.startswith("rl_REGEN_"):
+                        q_id = data.split("_")[2]
+                        if q_id in persona.pending_queries:
+                            rec = persona.pending_queries[q_id]
+                            ans_A, ans_B, new_qid = persona.converse_candidates(rec["user_name"], rec["prompt"])
+                            reply_text = (
+                                f"💬 *ጥያቄ:* {rec['prompt']}\n"
+                                f"────────────────────\n"
+                                f"🅰️ *አማራጭ 1 (Option A):*\n{ans_A}\n\n"
+                                f"🅱️ *አማራጭ 2 (Option B):*\n{ans_B}\n"
+                                f"────────────────────\n"
                             f"👇 *የትኛው መልስ የተሻለ ነው? (RLHF Feedback)*"
                         )
                         keyboard = [

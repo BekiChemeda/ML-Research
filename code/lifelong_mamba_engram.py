@@ -318,7 +318,7 @@ class LifelongAmharicSystem:
         self.model.eval()
         print("☀️ [WAKE UP] Synaptic consolidation complete! Memories permanently wired into Mamba weights.\n")
 
-    def rl_reward_step(self, prompt, chosen_response, lr=1e-5):
+    def rl_reward_step(self, prompt, chosen_response, rejected_response=None, lr=1e-5):
         """
         Safe Online RLHF Policy Gradient with Replay Buffer Anchoring.
         Trains on the chosen response alongside diverse anchor samples to prevent mode collapse.
