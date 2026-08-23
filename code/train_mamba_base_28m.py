@@ -149,7 +149,10 @@ class AmharicMambaBase(nn.Module):
     def forward(self, idx, targets=None, memory_module=None):
         x = self.embed(idx)
         for layer in self.layers:
-            x = layer(x)
+            if self.training:
+                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
+            else:
+                x = layer(x)
         if memory_module is not None:
             x = memory_module(x)
         x = self.norm_f(x)
