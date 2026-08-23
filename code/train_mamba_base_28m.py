@@ -30,53 +30,36 @@ import torch.nn.functional as F
 # FAST CHUNKED PARALLEL SELECTIVE SCAN
 # ==============================================================================
 def selective_scan_parallel(x_conv, delta, A, Bp, Cp, D, chunk_size=32):
-    """
-    Chunked Associative Parallel Scan for Mamba SSM.
-    Vectorizes sequential recurrence across sequence chunks using torch.cumsum.
-    """
-    B, L, D_in = x_conv.shape
+    B, L, d_inner = x_conv.shape
     d_state = A.shape[1]
+    orig_dtype = x_conv.dtype
+    n_chunks = (L + chunk_size - 1) // chunk_size
+    ys = []
+    h_prev = torch.zeros(B, d_inner, d_state, device=x_conv.device, dtype=torch.float32)
+    A_f32 = A.float()
 
-    if D is not None:
-        y_direct = x_conv * D.unsqueeze(0).unsqueeze(0)
-    else:
-        y_direct = 0.0
+    for i in range(n_chunks):
+        s = i * chunk_size
+        e = min(s + chunk_size, L)
+        delta_c = delta[:, s:e].float()
+        x_conv_c = x_conv[:, s:e].float()
+        Bp_c = Bp[:, s:e].float()
+        Cp_c = Cp[:, s:e].float()
 
-    pad_len = (chunk_size - (L % chunk_size)) % chunk_size
-    if pad_len > 0:
-        x_conv = F.pad(x_conv, (0, 0, 0, pad_len))
-        delta = F.pad(delta, (0, 0, 0, pad_len))
-        Bp = F.pad(Bp, (0, 0, 0, pad_len))
-        Cp = F.pad(Cp, (0, 0, 0, pad_len))
-        L_padded = L + pad_len
-    else:
-        L_padded = L
+        log_a_chunk = -delta_c.unsqueeze(-1) * A_f32.unsqueeze(0).unsqueeze(0)
+        u_chunk = delta_c.unsqueeze(-1) * Bp_c.unsqueeze(2) * x_conv_c.unsqueeze(-1)
 
-    num_chunks = L_padded // chunk_size
-    x_conv_c = x_conv.view(B, num_chunks, chunk_size, D_in)
-    delta_c = delta.view(B, num_chunks, chunk_size, D_in)
-    Bp_c = Bp.view(B, num_chunks, chunk_size, d_state)
-    Cp_c = Cp.view(B, num_chunks, chunk_size, d_state)
+        P = torch.cumsum(log_a_chunk, dim=1)
+        exp_P = torch.exp(P)
+        exp_neg_P = torch.exp(torch.clamp(-P, max=25.0))
 
-    log_a_chunk = -delta_c.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(0).unsqueeze(0)
-    P = torch.cumsum(log_a_chunk, dim=2)
-    exp_P = torch.exp(P)
-    exp_neg_P = torch.exp(-P)
-
-    u_chunk = delta_c.unsqueeze(-1) * Bp_c.unsqueeze(2) * x_conv_c.unsqueeze(-1)
-    
-    h_chunks = []
-    h_prev = torch.zeros(B, D_in, d_state, device=x_conv.device, dtype=x_conv.dtype)
-
-    for c in range(num_chunks):
-        h_chunk = exp_P[:, c] * (torch.cumsum(u_chunk[:, c] * exp_neg_P[:, c], dim=1) + h_prev.unsqueeze(1))
-        h_chunks.append(h_chunk)
+        h_chunk = exp_P * (torch.cumsum(u_chunk * exp_neg_P, dim=1) + h_prev.unsqueeze(1))
+        y_chunk = (h_chunk * Cp_c.unsqueeze(2)).sum(dim=-1)
+        ys.append(y_chunk.to(orig_dtype))
         h_prev = h_chunk[:, -1]
 
-    h = torch.cat(h_chunks, dim=1)[:, :L]
-    y_ssm = (h * Cp.unsqueeze(2)).sum(dim=-1)
-
-    return y_ssm + y_direct
+    y = torch.cat(ys, dim=1)
+    return y + x_conv * D
 
 
 # ==============================================================================
