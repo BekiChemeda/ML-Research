@@ -195,27 +195,24 @@ def main():
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Loading checkpoints on device: {device}...")
+    print(f"loading checkpoints on {device}...")
 
-    # Load Mamba
     mamba_model = TinyMamba(d_model=256, n_layer=6).to(device)
     mamba_ckpt_path = os.path.join(args.model_dir, "best_mamba.pt")
     if os.path.exists(mamba_ckpt_path):
         ckpt = torch.load(mamba_ckpt_path, map_location=device)
         mamba_model.load_state_dict(ckpt["model"])
-        print(f"✓ Loaded TinyMamba (best val BPB: {ckpt.get('val_bpb', 'N/A'):.3f})")
+        print(f"mamba loaded (val BPB: {ckpt.get('val_bpb', 'N/A'):.3f})")
     else:
-        print(f"Warning: {mamba_ckpt_path} not found!")
+        print(f"warning: {mamba_ckpt_path} not found")
 
-    # Load Transformer Byte
     xf_byte_model = TinyTransformer(d_model=256, n_layer=6, vocab_size=VOCAB_SIZE).to(device)
     xf_byte_path = os.path.join(args.model_dir, "best_transformer_byte.pt")
     if os.path.exists(xf_byte_path):
         ckpt = torch.load(xf_byte_path, map_location=device)
         xf_byte_model.load_state_dict(ckpt["model"])
-        print(f"✓ Loaded TinyTransformer Byte (best val BPB: {ckpt.get('val_bpb', 'N/A'):.3f})")
+        print(f"transformer-byte loaded (val BPB: {ckpt.get('val_bpb', 'N/A'):.3f})")
 
-    # Load SentencePiece Tokenizer & Tokenized Transformer
     import sentencepiece as spm
     sp_path = os.path.join(args.model_dir, "data", "amharic_sp_32k.model")
     if not os.path.exists(sp_path):
@@ -231,7 +228,7 @@ def main():
         if os.path.exists(xf_tok_path):
             ckpt = torch.load(xf_tok_path, map_location=device)
             xf_tok_model.load_state_dict(ckpt["model"])
-            print(f"✓ Loaded TinyTransformer Tokenized (vocab={actual_vocab}, best val BPB: {ckpt.get('val_bpb', 'N/A'):.3f})")
+            print(f"transformer-tokenized loaded (vocab={actual_vocab}, val BPB: {ckpt.get('val_bpb', 'N/A'):.3f})")
 
     mamba_model.eval()
     xf_byte_model.eval()

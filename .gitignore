@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints (large binary files)
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Training data binaries
+*.bin
+train.bin
+val.bin
+
+# Tokenizer binaries
+*.model
+*.vocab
+
+# Temp and swap files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and metrics (keep JSON metrics, ignore raw logs)
+*.log
+runs/
+wandb/
+
+# Office and presentation files
+*.docx
+*.pptx
+*.xlsx
+
+# Secrets
+.env
+*.key

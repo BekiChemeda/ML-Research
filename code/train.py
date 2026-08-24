@@ -26,9 +26,6 @@ import matplotlib
 matplotlib.use('Agg')  # Headless backend
 import matplotlib.pyplot as plt
 
-# ==============================================================================
-# CLI ARGUMENTS
-# ==============================================================================
 parser = argparse.ArgumentParser(description="Amharic Mamba vs. Transformer Research Training Pipeline")
 parser.add_argument("--max_steps", type=int, default=5000, help="Training steps per model (default: 5000)")
 parser.add_argument("--batch_size", type=int, default=16, help="Batch size (default: 16)")
@@ -46,9 +43,6 @@ parser.add_argument("--hf_token", type=str, default=os.environ.get("HF_TOKEN", "
 parser.add_argument("--quick_test", action="store_true", help="Run 1-minute test with minimal data")
 args = parser.parse_args()
 
-# ==============================================================================
-# HARDWARE SETUP
-# ==============================================================================
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 SEED = 1337
 torch.manual_seed(SEED)
@@ -64,17 +58,13 @@ scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 os.makedirs(args.data_dir, exist_ok=True)
 os.makedirs(args.output_dir, exist_ok=True)
 
-print("=" * 70, flush=True)
-print("AMHARIC BYTE-LEVEL MAMBA VS. TRANSFORMER RESEARCH PIPELINE", flush=True)
-print("=" * 70, flush=True)
 if torch.cuda.is_available():
     gpu_name = torch.cuda.get_device_name(0)
     vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-    print(f"Hardware: GPU {gpu_name} ({vram_gb:.1f} GB VRAM)", flush=True)
+    print(f"device: {gpu_name} ({vram_gb:.1f} GB VRAM)", flush=True)
 else:
-    print("Hardware: CPU (Warning: GPU recommended for speed)", flush=True)
-print(f"Configuration: steps={args.max_steps} | batch={args.batch_size} | block={args.block_size} | d_model={args.d_model} | layers={args.n_layer}", flush=True)
-print("=" * 70, flush=True)
+    print("device: cpu (warning: gpu recommended)", flush=True)
+print(f"steps={args.max_steps} batch={args.batch_size} block={args.block_size} d_model={args.d_model} layers={args.n_layer}", flush=True)
 
 # ==============================================================================
 # DATA INGESTION & SMART CACHING
@@ -115,11 +105,10 @@ def clean_and_filter(text):
     return text
 
 if os.path.exists(train_path) and os.path.exists(val_path) and os.path.getsize(train_path) > 1000:
-    print(f"\n[CACHE HIT] Found existing train.bin ({os.path.getsize(train_path)/1e6:.1f} MB) and val.bin ({os.path.getsize(val_path)/1e6:.1f} MB)", flush=True)
-    print("Skipping dataset download and preprocessing.", flush=True)
+    print(f"\ncache hit: train.bin ({os.path.getsize(train_path)/1e6:.1f} MB) val.bin ({os.path.getsize(val_path)/1e6:.1f} MB)", flush=True)
 else:
     from datasets import load_dataset
-    print("\n[DATA INGESTION] Pulling multi-source Amharic datasets...", flush=True)
+    print("\npulling amharic datasets...", flush=True)
     total_bytes = 0
     t0 = time.time()
     
@@ -201,9 +190,6 @@ else:
             written += len(chunk)
     print(f"Data saved to {train_path} ({os.path.getsize(train_path)/1e6:.1f} MB) and {val_path} ({os.path.getsize(val_path)/1e6:.1f} MB) in {time.time()-t0:.1f}s", flush=True)
 
-# ==============================================================================
-# TOKENIZER PIPELINE & SMART CACHING
-# ==============================================================================
 import sentencepiece as spm
 
 TOK_VOCAB_SIZE = 16000
@@ -218,9 +204,9 @@ if os.path.exists(TOK_TRAIN_PATH) and os.path.exists(TOK_VAL_PATH) and os.path.e
     train_tokens = os.path.getsize(TOK_TRAIN_PATH) // 4
     val_tokens = os.path.getsize(TOK_VAL_PATH) // 4
     BYTES_PER_TOKEN = (os.path.getsize(train_path) + os.path.getsize(val_path)) / max(1, (train_tokens + val_tokens))
-    print(f"\n[CACHE HIT] Loaded SentencePiece tokenizer (vocab={actual_tok_vocab}) | Fertility: {BYTES_PER_TOKEN:.2f} BPT", flush=True)
+    print(f"\ncache hit: sentencepiece tokenizer (vocab={actual_tok_vocab}, fertility={BYTES_PER_TOKEN:.2f} BPT)", flush=True)
 else:
-    print("\n[TOKENIZER] Training SentencePiece BPE tokenizer...", flush=True)
+    print("\ntraining sentencepiece tokenizer...", flush=True)
     SP_SAMPLE = os.path.join(args.data_dir, "tokenizer_train_sample.txt")
     with open(corpus_path, "r", encoding="utf-8") as f_in, open(SP_SAMPLE, "w", encoding="utf-8") as f_out:
         w = 0
@@ -263,9 +249,8 @@ else:
                     total_tokens += len(arr)
                 bytes_proc += len(line_str.encode("utf-8"))
     BYTES_PER_TOKEN = total_text_bytes / max(1, total_tokens)
-    print(f"Tokenization complete! Fertility: {BYTES_PER_TOKEN:.2f} BPT", flush=True)
+    print(f"tokenizer done. fertility: {BYTES_PER_TOKEN:.2f} BPT", flush=True)
 
-# Memory map datasets
 byte_train = np.memmap(train_path, dtype=np.uint8, mode="r")
 byte_val = np.memmap(val_path, dtype=np.uint8, mode="r")
 tok_train_arr = np.memmap(TOK_TRAIN_PATH, dtype=np.int32, mode="r")
@@ -274,9 +259,6 @@ tok_val_arr = np.memmap(TOK_VAL_PATH, dtype=np.int32, mode="r")
 print(f"\nCorpus Loaded: {len(byte_train):,} byte train | {len(byte_val):,} byte val", flush=True)
 print(f"Tokenized:     {len(tok_train_arr):,} token train | {len(tok_val_arr):,} token val", flush=True)
 
-# ==============================================================================
-# MODEL ARCHITECTURES
-# ==============================================================================
 VOCAB_SIZE = 256
 
 def selective_scan_parallel(x_conv, delta, A, Bp, Cp, D, chunk_size=32):
@@ -453,9 +435,6 @@ class TinyTransformer(nn.Module):
 def count_params(m):
     return sum(p.numel() for p in m.parameters())
 
-# ==============================================================================
-# TRAINING ENGINE
-# ==============================================================================
 def get_lr(step, max_steps=args.max_steps, warmup=args.warmup_steps, lr=args.lr, min_lr=args.min_lr):
     if step < warmup:
         return lr * (step + 1) / warmup
@@ -499,7 +478,7 @@ def train_model(model, name, train_arr, val_arr, bpt=1.0, max_steps=args.max_ste
     best_val = float("inf")
     t0 = time.time()
 
-    print(f"\n==================== Training {name} for {max_steps} steps ====================", flush=True)
+    print(f"\ntraining {name} for {max_steps} steps", flush=True)
 
     for step in range(1, max_steps + 1):
         cur_lr = get_lr(step, max_steps=max_steps)
@@ -539,27 +518,14 @@ def train_model(model, name, train_arr, val_arr, bpt=1.0, max_steps=args.max_ste
 
     return history
 
-# ==============================================================================
-# MAIN EXPERIMENT EXECUTION
-# ==============================================================================
-# Run 1: TinyMamba (Byte)
 mamba_model = TinyMamba(d_model=args.d_model, n_layer=args.n_layer, d_state=args.d_state)
 mamba_history = train_model(mamba_model, "mamba", byte_train, byte_val, bpt=1.0)
 
-# Run 2: TinyTransformer (Byte)
 xf_byte_model = TinyTransformer(d_model=args.d_model, n_layer=args.n_layer, vocab_size=VOCAB_SIZE)
 xf_byte_history = train_model(xf_byte_model, "transformer_byte", byte_train, byte_val, bpt=1.0)
 
-# Run 3: TinyTransformer (Tokenized)
 xf_tok_model = TinyTransformer(d_model=args.d_model, n_layer=args.n_layer, vocab_size=actual_tok_vocab)
 xf_tok_history = train_model(xf_tok_model, "transformer_tokenized", tok_train_arr, tok_val_arr, bpt=BYTES_PER_TOKEN)
-
-# ==============================================================================
-# VISUALIZATIONS & ARTIFACT GENERATION
-# ==============================================================================
-print("\n" + "=" * 70, flush=True)
-print("GENERATING RESEARCH PLOTS & EVALUATIONS", flush=True)
-print("=" * 70, flush=True)
 
 runs = [
     ("Mamba (byte)", mamba_history, '#1f77b4'),
@@ -597,12 +563,8 @@ for i, v in enumerate(mems):
 plt.tight_layout()
 plot_path = os.path.join(args.output_dir, "amharic_model_comparison.png")
 plt.savefig(plot_path, dpi=200)
-print(f"✓ Saved comparison plot to: {plot_path}", flush=True)
+print(f"saved comparison plot: {plot_path}", flush=True)
 
-# Qualitative Generation Check
-print("\n" + "=" * 60, flush=True)
-print("QUALITATIVE TEXT GENERATION SAMPLES", flush=True)
-print("=" * 60, flush=True)
 sample_prompts = ["ኢትዮጵያ በታሪኳ ", "ሰው ሰራሽ አስተውሎት ", "የአዲስ አበባ ከተማ "]
 for prompt in sample_prompts:
     print(f"\n[Prompt]: {prompt}", flush=True)
@@ -612,7 +574,6 @@ for prompt in sample_prompts:
     print(f"  [Mamba Byte]:       {bytes(out_m[0].cpu().tolist()).decode('utf-8', errors='replace')}", flush=True)
     print(f"  [Transformer Byte]: {bytes(out_xf[0].cpu().tolist()).decode('utf-8', errors='replace')}", flush=True)
 
-# Export Full Research Summary Report
 n_mamba = count_params(mamba_model)
 n_xf_b = count_params(xf_byte_model)
 n_xf_t = count_params(xf_tok_model)
@@ -659,6 +620,4 @@ report_md = f"""# Amharic Byte-Level Mamba vs. Transformer: Automated Research R
 with open(report_path, "w", encoding="utf-8") as f_rep:
     f_rep.write(report_md)
 
-print("\n" + "=" * 70, flush=True)
-print(f"SUCCESS! Complete research results exported to:\n  -> {report_path}", flush=True)
-print("=" * 70, flush=True)
+print(f"results saved to: {report_path}", flush=True)

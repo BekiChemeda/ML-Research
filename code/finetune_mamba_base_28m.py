@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-Instruction Fine-Tuning (SFT) for Amharic Mamba-Base (26.24M Parameters)
-Author: Beknan Chemeda
-- Aligns pre-trained Amharic Mamba-Base (Val BPB: 1.061) into Hayyuu Conversational Agent
-- Full 5-Epoch SFT on 4,359 Native Amharic Instruction Pairs
-- Prompt-Loss Masking (ignore_index=-100 on user prompt)
-- Automatic EOS delimiter generation (</s>)
-"""
-
 import os
 import sys
 import time
@@ -34,12 +25,9 @@ def run_base_sft():
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("=" * 70, flush=True)
-    print(f"🚀 INSTRUCTION FINE-TUNING MAMBA-BASE (26.24M) ON {device.upper()}", flush=True)
-    print("=" * 70, flush=True)
+    print(f"instruction fine-tuning mamba-base on {device}", flush=True)
 
     if not os.path.exists(args.csv_path):
-        # Fallback local path
         args.csv_path = "./data/amharic_instruction_dataset_5k.csv"
         if not os.path.exists(args.csv_path):
             args.csv_path = "../data/amharic_instruction_dataset_5k.csv"
@@ -49,9 +37,9 @@ def run_base_sft():
     p_col = df.columns[cols.index("instruction")] if "instruction" in cols else (df.columns[cols.index("prompt")] if "prompt" in cols else df.columns[0])
     r_col = df.columns[cols.index("response")] if "response" in cols else (df.columns[cols.index("answer")] if "answer" in cols else df.columns[1])
 
-    print(f"✓ Loaded {len(df):,} instruction pairs from '{args.csv_path}'", flush=True)
+    print(f"loaded {len(df):,} instruction pairs from '{args.csv_path}'", flush=True)
 
-    # Format training samples with user prompt loss masking
+    # Prompt-loss masking: only compute loss on bot response tokens
     samples = []
     for _, row in df.iterrows():
         p_str = str(row[p_col]).strip()
@@ -72,22 +60,17 @@ def run_base_sft():
 
         samples.append((input_ids, target_ids))
 
-    print(f"✓ Formatted {len(samples):,} prompt-masked instruction samples for SFT", flush=True)
+    print(f"formatted {len(samples):,} prompt-masked samples", flush=True)
 
-    # 80/20 train/val split
+    # 90/10 train/val split
     np.random.seed(42)
     np.random.shuffle(samples)
     split_idx = int(len(samples) * 0.90)
     train_samples = samples[:split_idx]
     val_samples = samples[split_idx:]
-    print(f"✓ Train Split: {len(train_samples):,} | Val Split: {len(val_samples):,}", flush=True)
+    print(f"train: {len(train_samples):,} | val: {len(val_samples):,}", flush=True)
 
-    # Load Base Pre-Trained Model
-    config = {
-        "d_model": 512,
-        "n_layer": 16,
-        "d_state": 16
-    }
+    config = {"d_model": 512, "n_layer": 16, "d_state": 16}
     model = AmharicMambaBase(**config).to(device)
 
     if os.path.exists(args.base_model_path):
@@ -95,9 +78,10 @@ def run_base_sft():
         state_dict = ckpt["model"] if "model" in ckpt else ckpt
         model.load_state_dict(state_dict)
         base_val_bpb = ckpt.get("val_bpb", 1.061)
-        print(f"✓ Loaded Pre-Trained Mamba-Base Weights from '{args.base_model_path}' (Val BPB: {base_val_bpb:.4f})", flush=True)
+        print(f"loaded pre-trained weights from '{args.base_model_path}' (val BPB: {base_val_bpb:.4f})", flush=True)
     else:
-        print(f"⚠️ Pre-trained weights not found at '{args.base_model_path}'! Starting from scratch.")
+        print(f"warning: pre-trained weights not found at '{args.base_model_path}', starting from scratch.")
+        base_val_bpb = 0.0
 
     def collate_batch(batch_list):
         max_b_len = max(len(s[0]) for s in batch_list)
@@ -133,7 +117,7 @@ def run_base_sft():
         return avg_loss, avg_loss / math.log(2)
 
     init_loss, init_bpb = evaluate_sft_val()
-    print(f"\n📊 Zero-Shot SFT Validation Loss: {init_loss:.4f} nats ({init_bpb:.4f} BPB)\n", flush=True)
+    print(f"zero-shot val loss: {init_loss:.4f} ({init_bpb:.4f} BPB)\n", flush=True)
 
     best_val_loss = float('inf')
     t_start = time.time()
@@ -165,11 +149,11 @@ def run_base_sft():
             n_batches += 1
 
             if n_batches % 50 == 0:
-                print(f"Epoch [{epoch}/{args.epochs}] Step [{n_batches}/{len(train_samples)//args.batch_size}] | Loss: {loss.item():.4f} ({loss.item()/math.log(2):.3f} BPB)", flush=True)
+                print(f"epoch [{epoch}/{args.epochs}] step [{n_batches}/{len(train_samples)//args.batch_size}] | loss {loss.item():.4f} ({loss.item()/math.log(2):.3f} BPB)", flush=True)
 
         val_loss, val_bpb = evaluate_sft_val()
         elapsed = (time.time() - t_start) / 60
-        print(f"\n🌟 [EPOCH {epoch}/{args.epochs} COMPLETE] Val Loss: {val_loss:.4f} nats | Val BPB: {val_bpb:.4f} Bits/Byte | Time: {elapsed:.1f}m", flush=True)
+        print(f"epoch {epoch}/{args.epochs} | val loss {val_loss:.4f} | val BPB {val_bpb:.4f} | {elapsed:.1f}m", flush=True)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -181,28 +165,22 @@ def run_base_sft():
                 "sft_val_bpb": val_bpb,
                 "base_val_bpb": base_val_bpb
             }, args.output_path)
-            print(f"🏆 Saved Best SFT Checkpoint to '{args.output_path}' (Val BPB: {val_bpb:.4f})", flush=True)
+            print(f"saved best -> '{args.output_path}' (val BPB: {val_bpb:.4f})", flush=True)
 
-        # Interactive live test
         test_questions = [
             "ስምህ ማነው? ማን ፈጠረህ?",
             "የኢትዮጵያ ዋና ከተማ ማን ናት?",
             "የአክሱም ሐውልት የት ይገኛል?",
             "ሰው ሰራሽ አስተውሎት (AI) ምንድን ነው?"
         ]
-        print("--- 🧪 INFERENCE BENCHMARK TEST ---", flush=True)
         for tq in test_questions:
             t_prompt = f"<s>[USER] {tq}\n[BOT] ".encode("utf-8")
             gen_b = model.generate(t_prompt, max_new_tokens=80, temperature=0.7, device=device)
             gen_t = gen_b.decode("utf-8", errors="replace")
             ans = gen_t.split("[BOT] ")[-1].split("</s>")[0].strip()
-            print(f"💬 Q: {tq}\n   🤖 Hayyuu: {ans}\n", flush=True)
-        print("-" * 50, flush=True)
+            print(f"  Q: {tq}\n  A: {ans}\n", flush=True)
 
-    print("\n" + "=" * 70, flush=True)
-    print(f"🎉 SFT FINE-TUNING FINISHED! Best Val BPB: {best_val_loss/math.log(2):.4f}", flush=True)
-    print(f"   Model ready for deployment at: '{args.output_path}'", flush=True)
-    print("=" * 70, flush=True)
+    print(f"sft done. best val BPB: {best_val_loss/math.log(2):.4f}  model: '{args.output_path}'", flush=True)
 
 if __name__ == "__main__":
     run_base_sft()

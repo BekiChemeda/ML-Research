@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-"""
-Pre-Training Script for Amharic Mamba-Base (21.1M Parameters, 10,000 Steps)
-==========================================================================
-Architecture:
-- d_model: 512
-- n_layer: 16
-- d_state: 16
-- Chunked Associative Parallel Scan (chunk_size=32)
-- Mixed Precision (AMP FP16)
-- Gradient Clipping: 1.0
-- Cosine LR Warmup & Decay (6e-4 -> 3e-5)
-- Standardized normal initialization (std=0.02)
-
-Author: Beknan Chemeda / AI Research Team
-"""
-
 import os
 import sys
 import math
@@ -28,9 +12,6 @@ import torch.nn.functional as F
 VOCAB_SIZE = 256
 
 
-# ==============================================================================
-# FAST CHUNKED ASSOCIATIVE SCAN
-# ==============================================================================
 def selective_scan_parallel(x_conv, delta, A, Bp, Cp, D, chunk_size=32):
     B, L, d_inner = x_conv.shape
     d_state = A.shape[1]
@@ -190,9 +171,6 @@ class AmharicMambaBase(nn.Module):
         return bytes(tokens)
 
 
-# ==============================================================================
-# DATASET LOADER (STREAMING BYTE MEMORY-MAP)
-# ==============================================================================
 class AmharicByteCorpus:
     def __init__(self, data_dir="/workspace/ML-Research/code/data", seq_len=384):
         self.data_dir = data_dir
@@ -203,33 +181,29 @@ class AmharicByteCorpus:
 
         if os.path.exists(train_path):
             self.train_data = np.memmap(train_path, dtype=np.uint8, mode='r')
-            print(f"✓ Opened Train Corpus: '{train_path}' ({len(self.train_data)/1e6:.2f} MB / {len(self.train_data)/1e9:.3f} GB)")
+            print(f"train corpus: {train_path} ({len(self.train_data)/1e6:.2f} MB)")
         else:
-            raise FileNotFoundError(f"Train corpus not found at '{train_path}'!")
+            raise FileNotFoundError(f"train corpus not found: {train_path}")
 
         if val_path and os.path.exists(val_path):
             self.val_data = np.memmap(val_path, dtype=np.uint8, mode='r')
-            print(f"✓ Opened Val Corpus: '{val_path}' ({len(self.val_data)/1e6:.2f} MB / {len(self.val_data)/1e9:.3f} GB)")
+            print(f"val corpus: {val_path} ({len(self.val_data)/1e6:.2f} MB)")
         else:
             split_idx = int(len(self.train_data) * 0.95)
             self.val_data = self.train_data[split_idx:]
             self.train_data = self.train_data[:split_idx]
-            print(f"✓ Split single corpus into Train: {len(self.train_data)/1e6:.1f} MB | Val: {len(self.val_data)/1e6:.1f} MB")
+            print(f"split corpus: train {len(self.train_data)/1e6:.1f} MB | val {len(self.val_data)/1e6:.1f} MB")
 
     def get_batch(self, batch_size=16, split="train", device="cuda"):
         data = self.train_data if split == "train" else self.val_data
         ix = np.random.randint(0, len(data) - self.seq_len - 1, size=batch_size)
         x_np = np.stack([data[i:i + self.seq_len] for i in ix])
         y_np = np.stack([data[i + 1:i + self.seq_len + 1] for i in ix])
-
         x = torch.tensor(x_np, dtype=torch.long, device=device)
         y = torch.tensor(y_np, dtype=torch.long, device=device)
         return x, y
 
 
-# ==============================================================================
-# MAIN PRE-TRAINING LOOP
-# ==============================================================================
 def train_mamba_base():
     parser = argparse.ArgumentParser(description="Pre-Train Amharic Mamba-Base (21.1M)")
     parser.add_argument("--data_dir", type=str, default="/workspace/ML-Research/code/data")
@@ -244,26 +218,16 @@ def train_mamba_base():
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("=" * 70)
-    print("🚀 PRE-TRAINING AMHARIC MAMBA-BASE (21.1M PARAMETERS, 10,000 STEPS)")
-    print(f"   Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
-    print("=" * 70)
+    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+    print(f"device: {gpu_name}")
 
-    # 1. Instantiate Model
-    config = {
-        "d_model": 512,
-        "n_layer": 16,
-        "d_state": 16
-    }
+    config = {"d_model": 512, "n_layer": 16, "d_state": 16}
     model = AmharicMambaBase(**config).to(device)
     param_count = model.count_parameters()
-    print(f"✓ Model Architecture: d_model={config['d_model']}, n_layer={config['n_layer']}, d_state={config['d_state']}")
-    print(f"✓ Active Trainable Parameters: {param_count:,} ({param_count/1e6:.2f}M)")
+    print(f"params: {param_count/1e6:.2f}M  d_model={config['d_model']} n_layer={config['n_layer']}")
 
-    # 2. Corpus Loader
     corpus = AmharicByteCorpus(args.data_dir, seq_len=args.seq_len)
 
-    # 3. Optimizer & Schedulers
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr_max, betas=(0.9, 0.95), weight_decay=0.05)
     scaler = torch.amp.GradScaler('cuda')
 
@@ -287,12 +251,10 @@ def train_mamba_base():
         model.train()
         torch.cuda.empty_cache()
         avg_loss = total_val_loss / n_batches
-        bpb = avg_loss / math.log(2)  # Nat to Bit conversion
+        bpb = avg_loss / math.log(2)
         return avg_loss, bpb
 
-    print("\n" + "=" * 70)
-    print(f"TRAINING IN PROGRESS: 0 -> {args.total_steps} Steps (Batch Size: {args.batch_size}, Seq: {args.seq_len})")
-    print("=" * 70)
+    print(f"training 0 -> {args.total_steps} steps  batch={args.batch_size}  seq={args.seq_len}")
 
     best_val_bpb = float('inf')
     t_start = time.time()
@@ -300,7 +262,6 @@ def train_mamba_base():
 
     model.train()
     for step in range(1, args.total_steps + 1):
-        # Update LR
         lr = get_lr(step)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
@@ -322,12 +283,12 @@ def train_mamba_base():
             t_step_start = time.time()
             steps_per_sec = 50 / (step_time * 50) if step > 1 else 1.0 / step_time
             eta_mins = (args.total_steps - step) / max(steps_per_sec, 1e-4) / 60
-            print(f"Step {step:05d}/{args.total_steps} | Loss: {loss.item():.4f} ({loss.item()/math.log(2):.3f} BPB) | LR: {lr:.2e} | Speed: {steps_per_sec:.2f} st/s | ETA: {eta_mins:.1f}m", flush=True)
+            print(f"step {step:05d}/{args.total_steps} | loss {loss.item():.4f} ({loss.item()/math.log(2):.3f} BPB) | lr {lr:.2e} | {steps_per_sec:.2f} st/s | eta {eta_mins:.1f}m", flush=True)
 
         if step % args.eval_interval == 0 or step == args.total_steps:
             val_loss, val_bpb = evaluate_val_loss(n_batches=30)
             elapsed_mins = (time.time() - t_start) / 60
-            print(f"\n📊 [EVAL STEP {step:05d}] Validation Loss: {val_loss:.4f} nats | Val BPB: {val_bpb:.4f} Bits/Byte | Elapsed: {elapsed_mins:.1f}m", flush=True)
+            print(f"eval {step:05d} | val loss {val_loss:.4f} | val BPB {val_bpb:.4f} | elapsed {elapsed_mins:.1f}m", flush=True)
 
             if val_bpb < best_val_bpb:
                 best_val_bpb = val_bpb
@@ -338,18 +299,14 @@ def train_mamba_base():
                     "val_loss": val_loss,
                     "val_bpb": val_bpb
                 }, args.save_path)
-                print(f"🏆 NEW RECORD! Saved Best Mamba-Base checkpoint to '{args.save_path}' (Val BPB: {val_bpb:.4f})", flush=True)
+                print(f"saved best -> {args.save_path}  (val BPB: {val_bpb:.4f})", flush=True)
 
-            # Sample generation
             test_prompt = "የኢትዮጵያ ታሪክ እና የዓድዋ ድል ".encode("utf-8")
             gen_bytes = model.generate(test_prompt, max_new_tokens=80, temperature=0.7, device=device)
             gen_text = gen_bytes.decode("utf-8", errors="replace")
-            print(f"📝 Sample Output: \"{gen_text[:120]}...\"\n", flush=True)
+            print(f"sample: {gen_text[:120]}\n", flush=True)
 
-    print("\n" + "=" * 70)
-    print(f"🎉 PRE-TRAINING COMPLETE! Best Validation BPB: {best_val_bpb:.4f}")
-    print(f"   Checkpoint saved to: '{args.save_path}'")
-    print("=" * 70)
+    print(f"done. best val BPB: {best_val_bpb:.4f}  checkpoint: {args.save_path}")
 
 
 if __name__ == "__main__":

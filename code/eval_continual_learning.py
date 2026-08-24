@@ -73,9 +73,7 @@ def compute_sequence_bpb(model, text, device="cuda", memory_module=None):
 
 def run_benchmark():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("=" * 70)
-    print("QUANTITATIVE BENCHMARK: BRAIN-INSPIRED CONTINUAL LEARNING IN AMHARIC")
-    print("=" * 70)
+    print("continual learning benchmark: hebbian memory + mamba")
 
     system = LifelongAmharicSystem(model_dir=".")
     
@@ -94,14 +92,11 @@ def run_benchmark():
         query = item["query"]
         keywords = item["target_keywords"]
 
-        # Step A: Evaluate baseline before learning
         bpb_before = compute_sequence_bpb(system.model, fact, device=device, memory_module=None)
         gen_before = system.generate(query, max_new_tokens=40, use_memory=False)
 
-        # Step B: Instant 1-Shot Hebbian Teaching
         system.teach(fact)
 
-        # Step C: Evaluate after Hebbian memory formation
         bpb_after_hebb = compute_sequence_bpb(system.model, fact, device=device, memory_module=system.memory)
         gen_after_hebb = system.generate(query, max_new_tokens=40, use_memory=True)
 
@@ -125,12 +120,10 @@ def run_benchmark():
         
         print(f"[Fact {i+1}] BPB: {bpb_before:.2f} -> {bpb_after_hebb:.2f} ({((bpb_before - bpb_after_hebb)/bpb_before)*100:+.1f}% improvement) | Entity recall: {hits_after}/{len(keywords)}")
 
-    # Step D: Synaptic Consolidation (Sleep)
     system.sleep_consolidation(steps=100)
     base_val_bpb_after = compute_sequence_bpb(system.model, val_sample_text, device=device)
     retention_rate = max(0, 100.0 - abs(base_val_bpb_after - base_val_bpb_before) / base_val_bpb_before * 100)
 
-    # Averages
     avg_bpb_before = np.mean([r["bpb_before"] for r in results])
     avg_bpb_after = np.mean([r["bpb_after"] for r in results])
     avg_pct_gain = np.mean([r["pct_reduction"] for r in results])
@@ -138,15 +131,10 @@ def run_benchmark():
     total_hits_after = sum(r["hits_after"] for r in results)
     total_possible_hits = sum(r["total_keywords"] for r in results)
 
-    print("\n" + "=" * 70)
-    print("FINAL CONTINUAL LEARNING BENCHMARK SUMMARY")
-    print("=" * 70)
-    print(f"1. 1-Shot Fact Compression Gain:    {avg_bpb_before:.3f} BPB -> {avg_bpb_after:.3f} BPB ({avg_pct_gain:+.1f}% drop)")
-    print(f"2. Catastrophic Forgetting Rate:    0.0% (Base Val BPB: {base_val_bpb_before:.3f} -> {base_val_bpb_after:.3f}, Retention: {retention_rate:.1f}%)")
-    print(f"3. Key-Entity Retrieval Hit-Rate:   {total_hits_before}/{total_possible_hits} ({total_hits_before/total_possible_hits*100:.1f}%) -> {total_hits_after}/{total_possible_hits} ({total_hits_after/total_possible_hits*100:.1f}%)")
-    print("=" * 70)
+    print(f"\n1-shot BPB: {avg_bpb_before:.3f} -> {avg_bpb_after:.3f} ({avg_pct_gain:+.1f}%)")
+    print(f"forgetting: val BPB {base_val_bpb_before:.3f} -> {base_val_bpb_after:.3f}, retention {retention_rate:.1f}%")
+    print(f"entity recall: {total_hits_before}/{total_possible_hits} -> {total_hits_after}/{total_possible_hits}")
 
-    # Plot figure
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
 
     # Panel 1: Per-Fact BPB Drop
@@ -175,7 +163,7 @@ def run_benchmark():
     plt.tight_layout()
     plot_path = "continual_learning_benchmark.png"
     plt.savefig(plot_path, dpi=200)
-    print(f"✓ Saved benchmark plot to: {plot_path}")
+    print(f"saved benchmark plot: {plot_path}")
 
     # Generate Markdown Report
     md_content = f"""# Brain-Inspired Lifelong Learning for Amharic: Quantitative Results
@@ -215,7 +203,7 @@ def run_benchmark():
     report_path = "CONTINUAL_LEARNING_RESULTS.md"
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(md_content)
-    print(f"✓ Saved results report to: {report_path}")
+    print(f"saved results report: {report_path}")
 
 if __name__ == "__main__":
     run_benchmark()
