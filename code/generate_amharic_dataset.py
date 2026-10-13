@@ -13,7 +13,7 @@ Schema & Distribution:
   5. Boundary & "I Don't Know" Handling        : 5%  (~250 pairs)
 
 Features:
-- Dual Parallel API Keys
+- Parallel API Keys via --api_keys or GEMINI_API_KEYS/GEMINI_API_KEY
 - Natural Conversational Tone with Dynamic Short, Medium & Relatable Answers
 - Thread-Safe SHA-256 Deduplication
 - Automatic Model Cascading Failover
@@ -35,10 +35,21 @@ import urllib.error
 from typing import List, Dict, Set, Optional
 
 # API Keys
-DEFAULT_API_KEYS = [
-    "AIzaSyAZQC5gdc-XzwHQeFpkoHXM5UwRb7kUe0M",
-    "AIzaSyCogsYx24QcgOJZP_zu4i9CtlMtJZlUvnM"
-]
+def get_default_api_keys() -> List[str]:
+    keys: List[str] = []
+
+    csv_keys = os.getenv("GEMINI_API_KEYS", "")
+    if csv_keys:
+        keys.extend(k.strip() for k in csv_keys.split(",") if k.strip())
+
+    single_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if single_key:
+        keys.append(single_key)
+
+    return list(dict.fromkeys(keys))
+
+
+DEFAULT_API_KEYS = get_default_api_keys()
 
 # Model Hierarchy
 MODEL_HIERARCHY = [
@@ -445,12 +456,26 @@ def worker_thread(worker_id: int, api_key: str, key_label: str, manager: Balance
 
 def main():
     parser = argparse.ArgumentParser(description="Hayyuu Everyday Conversational Amharic Generator")
-    parser.add_argument("--api_keys", nargs="+", default=DEFAULT_API_KEYS, help="List of Gemini API keys for parallel generation")
+    parser.add_argument(
+        "--api_keys",
+        nargs="+",
+        default=DEFAULT_API_KEYS,
+        help=(
+            "List of Gemini API keys for parallel generation. "
+            "Defaults to GEMINI_API_KEYS (comma-separated) and/or GEMINI_API_KEY."
+        ),
+    )
     parser.add_argument("--target_count", type=int, default=5000, help="Target total number of unique instruction pairs")
     parser.add_argument("--batch_size", type=int, default=5, help="Pairs requested per API call")
     parser.add_argument("--csv_output", type=str, default="./data/amharic_instruction_dataset_5k.csv", help="Path to output CSV")
     parser.add_argument("--jsonl_output", type=str, default="./data/amharic_instruction_dataset_5k.jsonl", help="Path to output JSONL")
     args = parser.parse_args()
+
+    if not args.api_keys:
+        parser.error(
+            "No Gemini API keys provided. Set GEMINI_API_KEYS or GEMINI_API_KEY, "
+            "or pass --api_keys KEY1 [KEY2 ...]."
+        )
 
     print("=" * 85, flush=True)
     print(" 🚀 Hayyuu (ሃዩ) Everyday Conversational Dataset Generator (No Code / No Math)", flush=True)
